@@ -1,10 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const taskController = require("../../controllers/task.controller");
-const { authenticate } = require("../../middleware/auth.middleware");
+const { authenticate, validateUserEmail } = require("../../middleware/auth.middleware");
 
-// All task routes require authentication
-router.use(authenticate);
+// All task routes require an authenticated, verified user.
+router.use(authenticate, validateUserEmail);
 
 /**
  * @swagger

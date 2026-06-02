@@ -19,8 +19,8 @@ const options = {
     },
     servers: [
       {
-        url: `http://localhost:${process.env.PORT || 5001}`,
-        description: "Local server",
+        url: `http://localhost:${process.env.PORT || 5001}/api/v1`,
+        description: "Local v1 API server",
       },
     ],
     components: {
@@ -46,10 +46,33 @@ const options = {
       schemas: {
         Error: {
           type: "object",
+          required: ["success", "message"],
           properties: {
             success: { type: "boolean", default: false },
             message: { type: "string" },
-            stack: { type: "string" },
+            errors: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          example: {
+            success: false,
+            message: "No valid token provided",
+            errors: [],
+          },
+        },
+        Success: {
+          type: "object",
+          required: ["success", "message"],
+          properties: {
+            success: { type: "boolean", default: true },
+            message: { type: "string" },
+            data: { type: "object" },
+          },
+          example: {
+            success: true,
+            message: "Request completed successfully",
+            data: {},
           },
         },
       },
@@ -61,6 +84,10 @@ const options = {
     ],
   },
   apis: [
+    path.join(__dirname, "../api/**/*.js"),
+    path.join(__dirname, "../modules/**/*.routes.js"),
+    path.join(__dirname, "../modules/**/*.controller.js"),
+    path.join(__dirname, "../modules/**/*.model.js"),
     path.join(__dirname, "../routes/*.js"),
     path.join(__dirname, "../routes/**/*.js"),
     path.join(__dirname, "../controllers/*.js"),

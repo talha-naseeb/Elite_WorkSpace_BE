@@ -1,10 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const integrationController = require("../controllers/integration.controller");
-const { authenticate, isAdmin } = require("../middleware/auth.middleware");
+const { authenticate, validateUserEmail, isAdmin } = require("../middleware/auth.middleware");
 
 // Protect all integration routes (Admin only)
-router.use(authenticate, isAdmin);
+router.use(authenticate, validateUserEmail, isAdmin);
 
 // Routes
 /**

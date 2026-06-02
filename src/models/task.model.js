@@ -15,6 +15,7 @@ const taskSchema = new mongoose.Schema(
     startDate: Date,
     dueDate: Date,
     completedAt: Date,
+    projectRef: { type: mongoose.Schema.Types.ObjectId, ref: "Project", default: null },
     adminRef: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     history: [
       {

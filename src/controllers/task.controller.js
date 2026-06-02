@@ -21,7 +21,7 @@ const notifyTaskUpdate = (req, event, data) => {
  * @access Admin, Manager, Employee (can assign to self or others)
  */
 exports.createTask = asyncHandler(async (req, res) => {
-  const { title, description, assignee, priority, dueDate, startDate } = req.body;
+  const { title, description, assignee, priority, dueDate, startDate, projectRef } = req.body;
   const adminId = req.user.role === "admin" ? req.user._id : req.user.adminRef;
 
   if (!title) throw ApiError.badRequest("Task title is required");
@@ -34,6 +34,7 @@ exports.createTask = asyncHandler(async (req, res) => {
     priority: priority || "medium",
     dueDate,
     startDate,
+    projectRef: projectRef || null,
     adminRef: adminId,
     history: [{
       status: "todo",
@@ -84,6 +85,7 @@ exports.getTasks = asyncHandler(async (req, res) => {
   const tasks = await Task.find(query)
     .populate("assignee", "name email role")
     .populate("assignedBy", "name email role")
+    .populate("projectRef", "title color status")
     .populate("comments.user", "name email role")
     .populate("history.updatedBy", "name email role")
     .sort({ createdAt: -1 });
@@ -184,7 +186,7 @@ exports.reassignTask = asyncHandler(async (req, res) => {
  */
 exports.updateTask = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, description, priority, dueDate, assignee } = req.body;
+  const { title, description, priority, dueDate, assignee, projectRef } = req.body;
 
   const task = await Task.findById(id);
   if (!task) throw ApiError.notFound("Task not found");
@@ -205,6 +207,7 @@ exports.updateTask = asyncHandler(async (req, res) => {
   if (priority) task.priority = priority;
   if (dueDate) task.dueDate = dueDate;
   if (assignee) task.assignee = assignee;
+  if (projectRef !== undefined) task.projectRef = projectRef || null;
 
   task.history.push({
     status: task.status,

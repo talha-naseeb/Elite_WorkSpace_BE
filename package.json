@@ -2,10 +2,11 @@
   "name": "auth-system-backend",
   "version": "1.0.0",
   "description": "Authentication system with role-based access and OAuth",
-  "main": "src/app.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js"
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

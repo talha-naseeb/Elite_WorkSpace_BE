@@ -35,6 +35,10 @@ const errorHandler = (err, req, res, next) => {
     message: error.message,
   };
 
+  if (error.errors?.length) {
+    response.errors = error.errors;
+  }
+
   res.status(error.statusCode).json(response);
 };
 

@@ -1,7 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const attendanceController = require("../../controllers/attendance.controller");
-const { authenticate, authorize } = require("../../middleware/auth.middleware");
+const { authenticate, validateUserEmail, authorize } = require("../../middleware/auth.middleware");
+
+// All attendance routes require an authenticated, verified user.
+router.use(authenticate, validateUserEmail);
 
 // clock-in/out
 /**
@@ -15,7 +18,7 @@ const { authenticate, authorize } = require("../../middleware/auth.middleware");
  *     responses:
  *       200: { description: Clocked in successfully }
  */
-router.post("/clock-in", authenticate, attendanceController.clockIn);
+router.post("/clock-in", attendanceController.clockIn);
 
 /**
  * @swagger
@@ -28,7 +31,7 @@ router.post("/clock-in", authenticate, attendanceController.clockIn);
  *     responses:
  *       200: { description: Clocked out successfully }
  */
-router.post("/clock-out", authenticate, attendanceController.clockOut);
+router.post("/clock-out", attendanceController.clockOut);
 
 /**
  * @swagger
@@ -41,7 +44,7 @@ router.post("/clock-out", authenticate, attendanceController.clockOut);
  *     responses:
  *       200: { description: List of attendance logs }
  */
-router.get("/my-history", authenticate, attendanceController.getMyHistory);
+router.get("/my-history", attendanceController.getMyHistory);
 
 /**
  * @swagger
@@ -54,6 +57,6 @@ router.get("/my-history", authenticate, attendanceController.getMyHistory);
  *     responses:
  *       200: { description: List of recent attendance logs in workspace }
  */
-router.get("/workspace", authenticate, authorize("manager", "admin"), attendanceController.getWorkspaceAttendance);
+router.get("/workspace", authorize("manager", "admin"), attendanceController.getWorkspaceAttendance);
 
 module.exports = router;
