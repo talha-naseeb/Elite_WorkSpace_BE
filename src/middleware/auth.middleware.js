@@ -194,7 +194,7 @@ exports.isSuperAdmin = exports.authorize("super_admin");
 exports.isManager = exports.authorize("manager", "admin", "super_admin");
 // 🔹 Profile Update Validation
 exports.validateUpdateProfile = (req, res, next) => {
-  const { name, mobileNumber } = req.body;
+  const { name, mobileNumber, theme } = req.body;
   const errors = [];
 
   if (name && !validator.isLength(name, { min: 2, max: 50 })) {
@@ -203,6 +203,10 @@ exports.validateUpdateProfile = (req, res, next) => {
 
   if (mobileNumber && !validator.isMobilePhone(mobileNumber)) {
     errors.push("Please provide a valid mobile number");
+  }
+
+  if (theme && !["light", "dark", "system"].includes(theme)) {
+    errors.push("Theme must be one of: light, dark, system");
   }
 
   if (errors.length > 0) {

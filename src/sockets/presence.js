@@ -8,15 +8,12 @@ async function broadcastActiveUsers(io, wsId) {
   if (!presenceMap) return;
 
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // Map all online user IDs to promises to fetch their latest profile info and attendance
+    // Map all online user IDs to promises to fetch their latest profile info and active time entry.
     const activeUsersPromises = Array.from(presenceMap.values()).map(async (u) => {
       try {
-        const [userDoc, attendanceDoc] = await Promise.all([
+        const [userDoc, activeTimeEntry] = await Promise.all([
           User.findById(u.id).select('name profileImage role'),
-          require("../models/attendance.model").findOne({ user: u.id, date: today }).select('loginTime logoutTime status')
+          require("../modules/time-tracking/time-entry.model").findOne({ user: u.id, status: "active" }).select("clockInAt status")
         ]);
 
         if (userDoc) {
@@ -25,14 +22,14 @@ async function broadcastActiveUsers(io, wsId) {
               name: userDoc.name,
               role: userDoc.role,
               profileImage: userDoc.profileImage,
-              isClockedIn: !!(attendanceDoc && attendanceDoc.loginTime && !attendanceDoc.logoutTime),
-              attendanceStatus: attendanceDoc?.status || 'none',
-              clockInTime: attendanceDoc?.loginTime
+              isClockedIn: !!activeTimeEntry,
+              attendanceStatus: activeTimeEntry ? "present" : "none",
+              clockInTime: activeTimeEntry?.clockInAt
            };
         }
         return null;
       } catch (error) {
-        console.error(`Error fetching user/attendance ${u.id}:`, error);
+        console.error(`Error fetching active user ${u.id}:`, error);
         return null;
       }
     });

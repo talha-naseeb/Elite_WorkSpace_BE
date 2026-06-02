@@ -1,26 +1,27 @@
 const mongoose = require("mongoose");
 
-const breakSchema = new mongoose.Schema({
-  breakIn: Date,
-  breakOut: Date,
-  durationMinutes: Number,
-});
-
 const attendanceSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    date: { type: Date, required: true }, // store date-only (set at check-in)
-    loginTime: Date,
-    logoutTime: Date,
-    breaks: [breakSchema],
-    totalHours: Number,
-    status: { type: String, enum: ["present", "absent", "half-day"], default: "present" },
-    adminRef: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    workspace: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    date: { type: Date, required: true },
+    checkInAt: Date,
+    checkOutAt: Date,
+    totalMinutes: { type: Number, default: 0 },
+    status: {
+      type: String,
+      enum: ["present", "absent", "half-day", "leave", "incomplete"],
+      default: "present",
+    },
+    closedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    closedReason: { type: String, trim: true, default: "" },
   },
   { timestamps: true }
 );
 
-attendanceSchema.index({ user: 1, date: 1 }, { unique: true }); // Ensure one record per user per date
-attendanceSchema.index({ adminRef: 1, date: -1 });
+attendanceSchema.index({ user: 1, workspace: 1, date: 1 }, { unique: true });
+attendanceSchema.index({ workspace: 1, date: -1 });
+attendanceSchema.index({ workspace: 1, user: 1, date: -1 });
+attendanceSchema.index({ workspace: 1, status: 1, date: -1 });
 
 module.exports = mongoose.model("Attendance", attendanceSchema);

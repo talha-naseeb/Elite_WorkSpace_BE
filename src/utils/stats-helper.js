@@ -21,10 +21,10 @@ const calculateAdminStats = async (adminId) => {
     logoutTime: { $in: [null, undefined] },
   });
 
-  // 3. Active Projects (Unique tasks that are in-progress or pending)
-  const activeProjects = await Task.countDocuments({
+  // 3. Active Tasks (non-terminal task statuses in this workspace)
+  const activeTasks = await Task.countDocuments({
     adminRef: adminId,
-    status: { $in: ["pending", "in-progress", "in-review"] },
+    status: { $in: ["todo", "in-progress", "under-review", "changes-requested"] },
   });
 
   // 4. Get the admin's limit
@@ -34,7 +34,7 @@ const calculateAdminStats = async (adminId) => {
     totalUsers,
     maxUsersLimit: admin?.maxUsersLimit || 3,
     activeSessions,
-    activeProjects,
+    activeTasks,
     systemHealth: "Active",
   };
 };

@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { ensureAttendanceIndexes } = require("./attendance-indexes");
 
 mongoose.connection.on("connected", () => {
   console.log("MongoDB connection established");
@@ -31,6 +32,7 @@ const connectDB = async () => {
     });
 
     console.log(`MongoDB Connected: ${conn.connection.host}`);
+    await ensureAttendanceIndexes();
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exit(1);

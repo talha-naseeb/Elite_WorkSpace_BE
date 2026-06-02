@@ -51,6 +51,11 @@ const userSchema = new mongoose.Schema(
     companyName: String,
     profileImage: String,
     companyLogo: String,
+    theme: {
+      type: String,
+      enum: ["light", "dark", "system"],
+      default: "light",
+    },
 
     isVerified: {
       type: Boolean,

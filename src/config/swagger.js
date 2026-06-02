@@ -42,6 +42,36 @@ const options = {
             },
           },
         },
+        BadRequestError: {
+          description: "The request body or parameters are invalid",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/Error",
+              },
+            },
+          },
+        },
+        ForbiddenError: {
+          description: "The authenticated user does not have permission to access this resource",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/Error",
+              },
+            },
+          },
+        },
+        NotFoundError: {
+          description: "The requested resource was not found",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/Error",
+              },
+            },
+          },
+        },
       },
       schemas: {
         Error: {
