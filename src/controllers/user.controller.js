@@ -58,7 +58,6 @@ exports.logoutUser = asyncHandler(async (req, res) => {
   req.token = null;
 
   const response = ApiResponse.success("Logged out successfully");
-  console.log("Logout:", response);
   res.status(response.statusCode).json(response);
 });
 

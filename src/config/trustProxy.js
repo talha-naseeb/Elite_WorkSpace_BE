@@ -1,3 +1,5 @@
+const { logger } = require("../utils/logger");
+
 const configureTrustProxy = (app) => {
   const isProduction = process.env.NODE_ENV === "production";
   let trustProxyValue;
@@ -17,7 +19,7 @@ const configureTrustProxy = (app) => {
 
   if (trustProxyValue !== undefined) {
     app.set("trust proxy", trustProxyValue);
-    console.log(`Trust proxy hops set to ${trustProxyValue}`);
+    logger.info("trust_proxy.configured", { hops: trustProxyValue });
   }
 };
 

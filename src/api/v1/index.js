@@ -6,6 +6,7 @@ const ticketRoutes = require("../../modules/tickets/ticket.routes");
 const managerRoutes = require("../../modules/teams/manager.routes");
 const superAdminRoutes = require("../../modules/super-admin/superAdmin.routes");
 const adminRoutes = require("../../modules/admin/admin.routes");
+const analyticsRoutes = require("../../modules/analytics/analytics.routes");
 const attendanceRoutes = require("../../modules/attendance/attendance.routes");
 const timeTrackingRoutes = require("../../modules/time-tracking/time-tracking.routes");
 const workspacePolicyRoutes = require("../../modules/workspace-policy/workspace-policy.routes");
@@ -14,21 +15,12 @@ const integrationRoutes = require("../../modules/integrations/integration.routes
 const activityRoutes = require("../../routes/activity.routes");
 const projectRoutes = require("../../modules/projects/project.routes");
 const { authRateLimiter, generalRateLimiter } = require("../../middleware/rateLimit.middleware");
+const { requestLogger } = require("../../middleware/requestLogger.middleware");
 const { getDbStatus } = require("../../config/database");
 
 const router = express.Router();
 
-router.use((req, res, next) => {
-  const start = Date.now();
-  const origin = req.headers.origin || req.headers.referer || req.ip;
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    console.log(`[API HIT] ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Time: ${duration}ms | From: ${origin}`);
-  });
-
-  next();
-});
+router.use(requestLogger);
 
 /**
  * @swagger
@@ -76,6 +68,7 @@ router.use("/tickets", ticketRoutes);
 router.use("/manager", managerRoutes);
 router.use("/super-admin", superAdminRoutes);
 router.use("/admin", adminRoutes);
+router.use("/analytics", analyticsRoutes);
 router.use("/attendance", attendanceRoutes);
 router.use("/time-tracking", timeTrackingRoutes);
 router.use("/workspace-policy", workspacePolicyRoutes);

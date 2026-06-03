@@ -7,6 +7,7 @@ const { hashPassword } = require("../utils/helpers/authHelpers");
 const { sendEmployeeCredentialsEmail } = require("../utils/email");
 const validator = require("validator");
 const { broadcastAdminStats } = require("../utils/stats-helper");
+const { logActivity } = require("../utils/activityLogger");
 const { notifySlack, employeeOnboardedMessage } = require("../utils/slack");
 
 // Manager creates an employee (or Admin can use same endpoint)
@@ -117,6 +118,15 @@ exports.createEmployee = asyncHandler(async (req, res) => {
   };
 
   const responseMessage = mailDeliveryWarning ? "Employee created (email delivery failed)." : "Employee created and verification email sent";
+
+  await logActivity({
+    type: "user_added",
+    message: `added ${user.name} as ${user.role}`,
+    userId: req.user._id,
+    adminRef: adminId,
+    metadata: { userId: user._id, role: user.role },
+    io: req.app.get("io"),
+  });
 
   notifySlack(adminId, employeeOnboardedMessage(name, email));
 

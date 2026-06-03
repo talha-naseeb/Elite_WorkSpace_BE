@@ -3,11 +3,13 @@ const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 const app = require("./app");
 const connectDB = require("./config/database");
+const { enforceProductionEnv } = require("./config/env");
 const { corsOptions } = require("./config/cors");
 const configureSocketAuth = require("./sockets/auth.socket");
 const initializeSockets = require("./sockets");
 const { registerJobs } = require("./jobs");
 const { registerEventListeners } = require("./events");
+const { logger } = require("./utils/logger");
 
 const PORT = process.env.PORT || 5001;
 const server = http.createServer(app);
@@ -20,11 +22,11 @@ configureSocketAuth(io);
 initializeSockets(io);
 
 const shutdown = async (signal) => {
-  console.log(`${signal} received. Shutting down gracefully...`);
+  logger.info("server.shutdown.started", { signal });
   server.close(async () => {
-    console.log("HTTP server closed.");
+    logger.info("server.http.closed");
     await mongoose.connection.close();
-    console.log("MongoDB connection closed.");
+    logger.info("server.mongodb.closed");
     process.exit(0);
   });
 
@@ -35,12 +37,13 @@ const shutdown = async (signal) => {
 };
 
 const startServer = async () => {
+  enforceProductionEnv();
   await connectDB();
   registerEventListeners();
   registerJobs();
 
   server.listen(PORT, () => {
-    console.log(`Server is running on port http://localhost:${PORT}`);
+    logger.info("server.started", { port: PORT });
   });
 };
 

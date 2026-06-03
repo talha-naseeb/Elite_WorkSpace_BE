@@ -54,8 +54,6 @@ const broadcastAdminStats = async (req, adminId) => {
     // Broadcast the updated stats to the workspace room
     // Use the event name 'admin:stats-update'
     io.to(adminId.toString()).emit("admin:stats-update", { stats });
-
-    console.log(`[Socket] Broadcasted updated stats to workspace: ${adminId}`);
   } catch (error) {
     console.error("[Socket] Failed to broadcast admin stats:", error);
   }

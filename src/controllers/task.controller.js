@@ -4,6 +4,7 @@ const ApiError = require("../utils/apiError");
 const ApiResponse = require("../utils/apiResponse");
 const asyncHandler = require("../utils/helpers/asyncHandler");
 const { broadcastAdminStats } = require("../utils/stats-helper");
+const { logActivity } = require("../utils/activityLogger");
 const { notifySlack, taskAssignedMessage, taskStatusMessage } = require("../utils/slack");
 
 // Helper to notify via Socket.io
@@ -12,7 +13,6 @@ const notifyTaskUpdate = (req, event, data) => {
   if (io && data.adminRef) {
     // Notify the specific workspace room
     io.to(String(data.adminRef)).emit(event, data);
-    console.log(`[Socket] Emitted ${event} to workspace ${data.adminRef}`);
   }
 };
 
@@ -102,6 +102,15 @@ exports.createTask = asyncHandler(async (req, res) => {
     notifySlack(adminId, taskAssignedMessage(task.title, task.assignee.name));
   }
 
+  await logActivity({
+    type: "task_created",
+    message: `created task "${task.title}"`,
+    userId: req.user._id,
+    adminRef: adminId,
+    metadata: { taskId: task._id },
+    io: req.app.get("io"),
+  });
+
   await broadcastAdminStats(req, adminId);
 
   res.status(201).json(ApiResponse.created("Task created successfully", { task }));
@@ -181,6 +190,15 @@ exports.updateTaskStatus = asyncHandler(async (req, res) => {
   // Notify everyone in the workspace about the status change
   notifyTaskUpdate(req, "task:status-updated", task);
   notifySlack(adminId, taskStatusMessage(task.title, status));
+
+  await logActivity({
+    type: "task_updated",
+    message: `changed "${task.title}" from ${oldStatus} to ${status}`,
+    userId: req.user._id,
+    adminRef: adminId,
+    metadata: { taskId: task._id, oldStatus, status },
+    io: req.app.get("io"),
+  });
 
   await broadcastAdminStats(req, adminId);
 
@@ -269,6 +287,15 @@ exports.updateTask = asyncHandler(async (req, res) => {
   await task.populate("assignedBy", "name email role");
 
   notifyTaskUpdate(req, "task:updated", task);
+
+  await logActivity({
+    type: "task_updated",
+    message: `updated task "${task.title}"`,
+    userId: req.user._id,
+    adminRef: adminId,
+    metadata: { taskId: task._id },
+    io: req.app.get("io"),
+  });
 
   res.status(200).json(ApiResponse.success("Task updated successfully", { task }));
 });

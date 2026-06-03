@@ -1,8 +1,9 @@
 const mongoose = require("mongoose");
 const { ensureAttendanceIndexes } = require("./attendance-indexes");
+const { logger } = require("../utils/logger");
 
 mongoose.connection.on("connected", () => {
-  console.log("MongoDB connection established");
+  logger.info("mongodb.connection.established");
 });
 
 mongoose.connection.on("disconnected", () => {
@@ -31,7 +32,7 @@ const connectDB = async () => {
       maxPoolSize: process.env.NODE_ENV === "production" ? 10 : 5,
     });
 
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    logger.info("mongodb.connected", { host: conn.connection.host });
     await ensureAttendanceIndexes();
   } catch (error) {
     console.error(`Error: ${error.message}`);

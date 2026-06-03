@@ -3,6 +3,41 @@ const ApiResponse = require("../utils/apiResponse");
 const ApiError = require("../utils/apiError");
 const asyncHandler = require("../utils/helpers/asyncHandler");
 const { sendSlackNotification } = require("../utils/slack");
+const { logActivity } = require("../utils/activityLogger");
+
+const ALLOWED_INTEGRATION_TYPES = ["slack", "teams", "github", "google_calendar"];
+const ALLOWED_INTEGRATION_STATUSES = ["active", "inactive"];
+
+const validateIntegrationType = (type) => {
+  if (!ALLOWED_INTEGRATION_TYPES.includes(type)) {
+    throw ApiError.badRequest("Invalid integration type");
+  }
+};
+
+const validateIntegrationStatus = (status) => {
+  if (!ALLOWED_INTEGRATION_STATUSES.includes(status)) {
+    throw ApiError.badRequest("Invalid integration status");
+  }
+};
+
+const validateSlackConfig = (config = {}) => {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith("https://hooks.slack.com/")) {
+    throw ApiError.badRequest("Webhook URL must start with https://hooks.slack.com/");
+  }
+};
+
+const logIntegrationActivity = ({ req, type, action }) =>
+  logActivity({
+    type: "settings_update",
+    message: `${type} integration ${action}`,
+    userId: req.user._id,
+    adminRef: req.user._id,
+    metadata: {
+      integration: type,
+      action,
+    },
+    io: req.app.get("io"),
+  });
 
 // @desc    Get all active integrations for the workspace
 // @route   GET /api/integrations
@@ -22,9 +57,8 @@ exports.toggleIntegration = asyncHandler(async (req, res) => {
   const { type, status } = req.body;
   const adminId = req.user._id;
 
-  if (!["slack", "teams", "github", "google_calendar"].includes(type)) {
-    throw ApiError.badRequest("Invalid integration type");
-  }
+  validateIntegrationType(type);
+  validateIntegrationStatus(status);
 
   let integration = await Integration.findOne({ adminRef: adminId, type });
 
@@ -39,6 +73,8 @@ exports.toggleIntegration = asyncHandler(async (req, res) => {
     });
   }
 
+  await logIntegrationActivity({ req, type, action: status });
+
   const response = ApiResponse.success(`${type} integration ${status}`, { integration });
   res.status(response.statusCode).json(response);
 });
@@ -50,12 +86,14 @@ exports.testWebhook = asyncHandler(async (req, res) => {
   const { type } = req.params;
   const adminId = req.user._id;
 
+  validateIntegrationType(type);
   if (type !== "slack") throw ApiError.badRequest("Webhook test only supported for Slack");
 
   const integration = await Integration.findOne({ adminRef: adminId, type, status: "active" });
   if (!integration?.config?.webhookUrl) {
     throw ApiError.badRequest("No webhook URL configured. Save a webhook URL first.");
   }
+  validateSlackConfig(integration.config);
 
   const result = await sendSlackNotification(
     integration.config.webhookUrl,
@@ -63,6 +101,8 @@ exports.testWebhook = asyncHandler(async (req, res) => {
   );
 
   if (!result.success) throw ApiError.badRequest(`Webhook test failed: ${result.error}`);
+
+  await logIntegrationActivity({ req, type, action: "tested" });
 
   const response = ApiResponse.success("Test message sent to Slack successfully");
   res.status(response.statusCode).json(response);
@@ -76,6 +116,9 @@ exports.updateConfig = asyncHandler(async (req, res) => {
   const { config } = req.body;
   const adminId = req.user._id;
 
+  validateIntegrationType(type);
+  if (type === "slack") validateSlackConfig(config);
+
   const integration = await Integration.findOneAndUpdate(
     { adminRef: adminId, type },
     { config },
@@ -83,6 +126,8 @@ exports.updateConfig = asyncHandler(async (req, res) => {
   );
 
   if (!integration) throw ApiError.notFound("Integration not found");
+
+  await logIntegrationActivity({ req, type, action: "configured" });
 
   const response = ApiResponse.success("Integration configuration updated", { integration });
   res.status(response.statusCode).json(response);

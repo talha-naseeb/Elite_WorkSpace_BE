@@ -173,14 +173,11 @@ exports.authorize = (...roles) => {
     // role must exist and be a string
     const role = req.user.role;
     if (!role || typeof role !== "string") {
-      // Log for debugging (remove in prod or use logger)
-      console.log("Authorization check failed — missing role on user:", { userId: req.user._id, role });
       return next(ApiError.forbidden("Insufficient permissions"));
     }
 
     // final check
     if (!roles.includes(role)) {
-      console.log("Authorization denied — user role not allowed:", { userId: req.user._id, role, required: roles });
       return next(ApiError.forbidden("You do not have permission to perform this action"));
     }
 

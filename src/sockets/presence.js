@@ -82,7 +82,6 @@ function handlePresence(io, socket) {
     }
 
     socket.join(String(requestedWorkspaceId));
-    console.log(`User joined workspace: ${requestedWorkspaceId}`);
     if (typeof callback === "function") callback({ ok: true });
     broadcastActiveUsers(io, String(requestedWorkspaceId));
   });
@@ -99,7 +98,6 @@ function handlePresence(io, socket) {
         broadcastActiveUsers(io, wsId);
       }
     }
-    console.log(`User ${name} [${userId}] disconnected`);
   });
 }
 

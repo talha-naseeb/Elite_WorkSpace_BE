@@ -1,4 +1,5 @@
 const User = require("../models/user.model");
+const { logger } = require("./logger");
 
 const cleanupExpiredTokens = async () => {
   try {
@@ -9,7 +10,10 @@ const cleanupExpiredTokens = async () => {
     const result2 = await User.updateMany({ emailVerificationExpires: { $lte: now } }, { $unset: { emailVerificationToken: "", emailVerificationExpires: "" } });
 
     if (result1.modifiedCount > 0 || result2.modifiedCount > 0) {
-      console.log(`[TokenCleanup] expired token cleanup: resetPassword=${result1.modifiedCount}, emailVerification=${result2.modifiedCount}`);
+      logger.info("token_cleanup.expired_tokens_removed", {
+        resetPassword: result1.modifiedCount,
+        emailVerification: result2.modifiedCount,
+      });
     }
   } catch (error) {
     console.error("[TokenCleanup] Failed to remove expired tokens:", error);

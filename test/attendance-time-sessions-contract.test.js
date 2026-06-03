@@ -190,6 +190,8 @@ test("frontend services and top bar use attendance state machine and timezone pa
   const workspacePolicyService = readWorkspace("front-end", "src", "services", "workspacePolicy.service.ts");
   const timeTrackingService = readWorkspace("front-end", "src", "services", "timeTracking.service.ts");
   const layout = readWorkspace("front-end", "src", "components", "layout", "DashboardLayout.tsx");
+  const header = readWorkspace("front-end", "src", "components", "layout", "DashboardHeader.tsx");
+  const topBarSource = `${layout}\n${header}`;
   const settings = readWorkspace("front-end", "src", "pages", "settings", "IntegrationSettings.tsx");
 
   for (const fn of ["checkIn", "startBreak", "endBreak", "checkOut", "getToday", "getMyWeek", "getTeamWeek", "getWorkspaceWeek"]) {
@@ -210,6 +212,6 @@ test("frontend services and top bar use attendance state machine and timezone pa
   assert.match(settings, /Flexible/, "admin settings should expose flexible option");
   assert.match(settings, /Fixed/, "admin settings should expose fixed option");
   for (const label of ["Check In", "Start Break", "End Break", "Check Out", "Task Timer"]) {
-    assert.match(layout, new RegExp(label), `top bar should render ${label}`);
+    assert.match(topBarSource, new RegExp(label), `top bar should render ${label}`);
   }
 });

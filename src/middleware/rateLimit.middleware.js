@@ -27,26 +27,28 @@ const defaultLimiterConfig = {
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => ["/api/health", "/health", "/metrics"].includes(req.path),
+};
+
+const createLimiterConfig = ({ windowMs, max, message, keyGenerator }) => ({
+  windowMs,
+  max,
+  message,
+  keyGenerator,
+  ...defaultLimiterConfig,
   handler: (req, res) => {
-    return res.status(429).json({
+    return res.status(429).json(message ?? {
       success: false,
       message: "Too many requests. Please try again later.",
     });
   },
-};
+});
 
 const createLimiter = ({ windowMs, max, message, keyGenerator }) => {
   if (!rateLimit) {
     return createNoopLimiter();
   }
 
-  return rateLimit({
-    windowMs,
-    max,
-    message,
-    keyGenerator,
-    ...defaultLimiterConfig,
-  });
+  return rateLimit(createLimiterConfig({ windowMs, max, message, keyGenerator }));
 };
 
 const authRateLimiter = createLimiter({
@@ -74,5 +76,6 @@ const generalRateLimiter = createLimiter({
 
 module.exports = {
   authRateLimiter,
+  createLimiterConfig,
   generalRateLimiter,
 };

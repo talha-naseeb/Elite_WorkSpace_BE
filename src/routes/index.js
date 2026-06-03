@@ -12,22 +12,13 @@ const integrationRoutes = require("./integration.routes");
 const activityRoutes = require("./activity.routes");
 const projectRoutes = require("./project.routes");
 const { authRateLimiter, generalRateLimiter } = require("../middleware/rateLimit.middleware");
+const { requestLogger } = require("../middleware/requestLogger.middleware");
 const { getDbStatus } = require("../config/database");
 
 const router = express.Router();
 
 // Global request logger
-router.use((req, res, next) => {
-  const start = Date.now();
-  const origin = req.headers.origin || req.headers.referer || req.ip;
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    console.log(`[API HIT] ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Time: ${duration}ms | From: ${origin}`);
-  });
-
-  next();
-});
+router.use(requestLogger);
 
 // Overall API Health Check Endpoint
 router.get("/health", (req, res) => {
