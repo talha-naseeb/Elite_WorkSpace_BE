@@ -1,9 +1,11 @@
-const ApiError = require("../../shared/errors/apiError");
+const ApiError = require("../../utils/apiError");
+const { validateTimezone } = require("../../shared/utils/timezone");
 
 const ALLOWED_SOURCES = new Set(["manual", "desktop-app", "browser"]);
 
 const validateClockInPayload = (req, _res, next) => {
   const { source, notes } = req.body || {};
+  req.body.timezone = validateTimezone(req.body.timezone);
 
   if (source && !ALLOWED_SOURCES.has(source)) {
     return next(

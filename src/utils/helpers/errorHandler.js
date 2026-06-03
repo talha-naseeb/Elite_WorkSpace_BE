@@ -39,6 +39,22 @@ const errorHandler = (err, req, res, next) => {
     response.errors = error.errors;
   }
 
+  if (error.errorCode || error.code) {
+    response.code = error.errorCode || error.code;
+  }
+
+  if (error.currentState) {
+    response.currentState = error.currentState;
+  }
+
+  if (error.attendanceMode) {
+    response.attendanceMode = error.attendanceMode;
+  }
+
+  if (error.allowedActions) {
+    response.allowedActions = error.allowedActions;
+  }
+
   res.status(error.statusCode).json(response);
 };
 

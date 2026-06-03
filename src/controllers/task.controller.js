@@ -1,4 +1,5 @@
 const Task = require("../models/task.model");
+const Project = require("../models/project.model");
 const ApiError = require("../utils/apiError");
 const ApiResponse = require("../utils/apiResponse");
 const asyncHandler = require("../utils/helpers/asyncHandler");
@@ -15,6 +16,48 @@ const notifyTaskUpdate = (req, event, data) => {
   }
 };
 
+const getAdminId = (user) => user.role === "admin" ? user._id : user.adminRef;
+
+const isIndividualContributor = (user) => user.role === "developer" || user.role === "employee";
+
+const validateCreateTaskAssignee = async ({ user, adminId, assignee, projectRef }) => {
+  const requestedAssignee = assignee || user._id;
+
+  if (!isIndividualContributor(user)) {
+    return requestedAssignee;
+  }
+
+  if (!projectRef) {
+    if (String(requestedAssignee) !== String(user._id)) {
+      throw ApiError.forbidden("Without a project, you can only assign tasks to yourself.");
+    }
+    return requestedAssignee;
+  }
+
+  const project = await Project.findOne({ _id: projectRef, adminRef: adminId }).select("members manager createdBy");
+  if (!project) {
+    throw ApiError.notFound("Project not found.");
+  }
+
+  const canAccessProject =
+    String(project.createdBy) === String(user._id) ||
+    String(project.manager) === String(user._id) ||
+    project.members.some((memberId) => String(memberId) === String(user._id));
+
+  if (!canAccessProject) {
+    throw ApiError.forbidden("You can only create tasks inside projects you belong to.");
+  }
+
+  const isSelf = String(requestedAssignee) === String(user._id);
+  const isProjectMember = project.members.some((memberId) => String(memberId) === String(requestedAssignee));
+
+  if (!isSelf && !isProjectMember) {
+    throw ApiError.forbidden("If selecting a teammate, choose someone from the selected project.");
+  }
+
+  return requestedAssignee;
+};
+
 /**
  * @desc Create a new task
  * @route POST /api/tasks
@@ -22,15 +65,21 @@ const notifyTaskUpdate = (req, event, data) => {
  */
 exports.createTask = asyncHandler(async (req, res) => {
   const { title, description, assignee, priority, dueDate, startDate, projectRef } = req.body;
-  const adminId = req.user.role === "admin" ? req.user._id : req.user.adminRef;
+  const adminId = getAdminId(req.user);
 
   if (!title) throw ApiError.badRequest("Task title is required");
+  const validatedAssignee = await validateCreateTaskAssignee({
+    user: req.user,
+    adminId,
+    assignee,
+    projectRef,
+  });
 
   const task = new Task({
     title,
     description,
     assignedBy: req.user._id,
-    assignee: assignee || req.user._id, // default to self if not provided
+    assignee: validatedAssignee,
     priority: priority || "medium",
     dueDate,
     startDate,

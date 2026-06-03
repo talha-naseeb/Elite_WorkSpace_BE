@@ -15,8 +15,21 @@ const getAdminId = (user) =>
  */
 exports.getProjects = asyncHandler(async (req, res) => {
   const adminId = getAdminId(req.user);
+  const isIndividualContributor = req.user.role === "developer" || req.user.role === "employee";
+  let projectFilter = { adminRef: adminId };
 
-  const projects = await Project.find({ adminRef: adminId })
+  if (isIndividualContributor) {
+    projectFilter = {
+      adminRef: adminId,
+      $or: [
+        { members: req.user._id },
+        { manager: req.user._id },
+        { createdBy: req.user._id },
+      ],
+    };
+  }
+
+  const projects = await Project.find(projectFilter)
     .populate("createdBy", "name email")
     .populate("manager", "name email")
     .populate("members", "name email role")

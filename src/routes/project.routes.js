@@ -11,7 +11,7 @@ router.use(authenticate, validateUserEmail);
 // POST /api/projects        — create a new project
 router
   .route("/")
-  .get(authorize("admin", "manager"), projectController.getProjects)
+  .get(authorize("admin", "manager", "developer", "employee"), projectController.getProjects)
   .post(authorize("admin", "manager"), projectController.createProject);
 
 // GET    /api/projects/:id  — get project + its tasks

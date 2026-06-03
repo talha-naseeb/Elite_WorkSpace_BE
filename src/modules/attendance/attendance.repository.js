@@ -1,43 +1,55 @@
 const Attendance = require("./attendance.model");
 
-const findByUserAndDate = (userId, date) => Attendance.findOne({ user: userId, date });
+const POPULATE_USER = "name email role manager profileImage";
+
+const findByUserWorkspaceAndShiftDate = (userId, workspaceId, shiftDate) =>
+  Attendance.findOne({ userId, workspaceId, shiftDate });
 
 const findByUserWorkspaceAndDate = (userId, workspaceId, date) =>
-  Attendance.findOne({ user: userId, workspace: workspaceId, date });
-
-const findLegacyByUserAndDate = (userId, date) =>
   Attendance.findOne({
-    user: userId,
-    date,
     $or: [
-      { workspace: { $exists: false } },
-      { workspace: null },
+      { userId, workspaceId, shiftDate: typeof date === "string" ? date : undefined },
+      { user: userId, workspace: workspaceId, date },
     ],
   });
 
-const findById = (id) => Attendance.findById(id).populate("user", "name email role manager profileImage");
+const findActiveByUser = (userId, workspaceId) =>
+  Attendance.findOne({
+    userId,
+    workspaceId,
+    currentState: { $in: ["working", "break"] },
+  }).sort({ updatedAt: -1 });
+
+const findById = (id) => Attendance.findById(id).populate("userId", POPULATE_USER).populate("user", POPULATE_USER);
 
 const create = (data) => new Attendance(data);
 
-const findUserHistory = (userId, limit = 30) => Attendance.find({ user: userId }).sort({ date: -1 }).limit(limit);
+const save = (document) => document.save();
 
-const findWorkspaceAttendance = (adminId) =>
-  Attendance.find({ workspace: adminId })
-    .populate("user", "name email role manager profileImage")
-    .sort({ date: -1 });
+const findUserHistory = (userId, limit = 30) =>
+  Attendance.find({ userId })
+    .populate("userId", POPULATE_USER)
+    .sort({ shiftDate: -1 })
+    .limit(limit);
+
+const findWorkspaceAttendance = (workspaceId) =>
+  Attendance.find({ workspaceId })
+    .populate("userId", POPULATE_USER)
+    .sort({ shiftDate: -1 });
 
 const findWeeklyAttendance = async ({ filter, page, limit, weekStart, weekEnd }) => {
   const query = {
     ...filter,
-    date: { $gte: weekStart, $lte: weekEnd },
+    shiftDate: { $gte: weekStart, $lte: weekEnd },
   };
   const skip = (page - 1) * limit;
 
   const [records, total] = await Promise.all([
     Attendance.find(query)
-      .populate("user", "name email role manager profileImage")
+      .populate("userId", POPULATE_USER)
+      .populate("user", POPULATE_USER)
       .populate("closedBy", "name email role")
-      .sort({ date: -1, checkInAt: -1 })
+      .sort({ shiftDate: -1, updatedAt: -1 })
       .skip(skip)
       .limit(limit),
     Attendance.countDocuments(query),
@@ -49,24 +61,27 @@ const findWeeklyAttendance = async ({ filter, page, limit, weekStart, weekEnd })
 const summarizeWeeklyAttendance = async ({ filter, weekStart, weekEnd }) => {
   const records = await Attendance.find({
     ...filter,
-    date: { $gte: weekStart, $lte: weekEnd },
-  }).select("status totalMinutes");
+    shiftDate: { $gte: weekStart, $lte: weekEnd },
+  }).select("attendanceStatus currentState totalWorkMinutes totalBreakMinutes");
 
   return {
-    present: records.filter((record) => record.status === "present").length,
-    incomplete: records.filter((record) => record.status === "incomplete").length,
-    absent: records.filter((record) => record.status === "absent").length,
-    totalMinutes: records.reduce((sum, record) => sum + (record.totalMinutes || 0), 0),
+    present: records.filter((record) => record.attendanceStatus === "present").length,
+    incomplete: records.filter((record) => record.attendanceStatus === "incomplete").length,
+    absent: records.filter((record) => record.attendanceStatus === "absent").length,
+    totalMinutes: records.reduce((sum, record) => sum + (record.totalWorkMinutes || 0), 0),
+    totalWorkMinutes: records.reduce((sum, record) => sum + (record.totalWorkMinutes || 0), 0),
+    totalBreakMinutes: records.reduce((sum, record) => sum + (record.totalBreakMinutes || 0), 0),
   };
 };
 
 module.exports = {
   model: Attendance,
   create,
+  save,
   findById,
-  findByUserAndDate,
   findByUserWorkspaceAndDate,
-  findLegacyByUserAndDate,
+  findByUserWorkspaceAndShiftDate,
+  findActiveByUser,
   findUserHistory,
   findWorkspaceAttendance,
   findWeeklyAttendance,

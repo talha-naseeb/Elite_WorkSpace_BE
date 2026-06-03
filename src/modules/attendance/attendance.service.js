@@ -1,329 +1,439 @@
-const ApiError = require("../../shared/errors/apiError");
-const { ATTENDANCE_STATUS } = require("../../shared/constants/attendance-status");
-const timeTrackingService = require("../time-tracking/time-tracking.service");
-const User = require("../users/user.model");
+const ApiError = require("../../utils/apiError");
+const User = require("../../models/user.model");
+const { getShiftDate, validateTimezone } = require("../../shared/utils/timezone");
+const workspacePolicyService = require("../workspace-policy/workspace-policy.service");
 const repository = require("./attendance.repository");
 
-const getWorkspaceId = (user) => user.adminRef || user._id;
+const ACTIVE_STATES = ["working", "break"];
 
-const getUserId = (user) => user._id || user.id;
+const getWorkspaceId = (user) => user.adminRef || user._id || user.id;
+const normalizeDateInput = (date = new Date()) => (date instanceof Date ? date : new Date(date));
 
-const getToday = () => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return today;
+const addDaysToShiftDate = (shiftDate, days) => {
+  const date = new Date(`${shiftDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 };
 
-const minutesBetween = (start, end) => Math.max(0, Math.round((end - start) / (1000 * 60)));
-
-const getMonday = (date = new Date()) => {
-  const monday = new Date(date);
-  const day = monday.getDay();
-  const diff = monday.getDate() - day + (day === 0 ? -6 : 1);
-  monday.setDate(diff);
-  monday.setHours(0, 0, 0, 0);
-  return monday;
+const getWeekRange = (weekStart) => {
+  const base = weekStart ? new Date(`${weekStart}T00:00:00.000Z`) : new Date();
+  const day = base.getUTCDay();
+  const diff = base.getUTCDate() - day + (day === 0 ? -6 : 1);
+  base.setUTCDate(diff);
+  const start = base.toISOString().slice(0, 10);
+  return { weekStart: start, weekEnd: addDaysToShiftDate(start, 6) };
 };
 
-const getWeekRange = (weekStartInput) => {
-  const weekStart = weekStartInput ? new Date(`${weekStartInput}T00:00:00.000Z`) : getMonday();
+const invalidTransition = (message, currentState, attendanceMode = "fixed", allowedActions = []) =>
+  ApiError.badRequest(message, [], {
+    errorCode: "INVALID_STATE_TRANSITION",
+    attendanceMode,
+    currentState,
+    allowedActions,
+  });
 
-  if (Number.isNaN(weekStart.getTime())) {
-    throw ApiError.badRequest("Invalid weekStart. Use YYYY-MM-DD format.", [
-      {
-        field: "weekStart",
-        example: "2026-06-02",
-        guidance: "Pass any Monday date as YYYY-MM-DD for Monday-Sunday attendance reports.",
-      },
-    ]);
-  }
+const getActiveSession = (attendance) => attendance.sessions.find((session) => !session.endAt);
+const minutesBetween = (startAt, endAt) => Math.max(0, Math.round((endAt.getTime() - new Date(startAt).getTime()) / 60000));
 
-  const monday = getMonday(weekStart);
-  const weekEnd = new Date(monday);
-  weekEnd.setDate(monday.getDate() + 6);
-  weekEnd.setHours(23, 59, 59, 999);
+const getPolicyForUser = async (user) => workspacePolicyService.ensureWorkspacePolicy(getWorkspaceId(user));
 
-  return { weekStart: monday, weekEnd };
+const calculateImplicitBreakMinutes = (sessions = []) => {
+  const completedWorkSessions = sessions
+    .filter((session) => session.type === "work" && session.startAt && session.endAt)
+    .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+
+  return completedWorkSessions.reduce((total, session, index) => {
+    if (index === 0) return total;
+    const previous = completedWorkSessions[index - 1];
+    return total + minutesBetween(previous.endAt, new Date(session.startAt));
+  }, 0);
 };
 
-const normalizePagination = ({ page = "1", limit = "10" }) => {
-  const parsedPage = Math.max(1, Number.parseInt(page, 10) || 1);
-  const parsedLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+const getAllowedActions = (attendance, attendanceMode = "fixed") => {
+  const currentState = attendance?.currentState || "offline";
+  const hasActiveSession = Boolean(attendance && getActiveSession(attendance));
 
-  return { page: parsedPage, limit: parsedLimit };
+  if (attendanceMode === "flexible") {
+    return hasActiveSession ? ["check-out"] : ["check-in"];
+  }
+
+  if (currentState === "offline") return ["check-in"];
+  if (currentState === "working") return ["start-break", "check-out"];
+  if (currentState === "break") return ["end-break", "check-out"];
+  return [];
 };
 
-const getAttendanceAccessScope = async ({ user, query = {} }) => {
-  const userId = getUserId(user);
+const computeTotals = (attendance, attendanceMode = "fixed") => {
+  attendance.totalWorkMinutes = attendance.sessions
+    .filter((session) => session.type === "work" && session.endAt)
+    .reduce((sum, session) => sum + minutesBetween(session.startAt, session.endAt), 0);
+  attendance.totalBreakMinutes = attendanceMode === "flexible"
+    ? calculateImplicitBreakMinutes(attendance.sessions)
+    : attendance.sessions
+      .filter((session) => session.type === "break" && session.endAt)
+      .reduce((sum, session) => sum + minutesBetween(session.startAt, session.endAt), 0);
+  attendance.totalMinutes = attendance.totalWorkMinutes;
+  return attendance;
+};
 
-  if (user.role === "admin") {
-    const filter = { workspace: userId };
-    if (query.userId) filter.user = query.userId;
+const syncLegacyAliases = (attendance) => {
+  attendance.user = attendance.user || attendance.userId;
+  attendance.workspace = attendance.workspace || attendance.workspaceId;
+  attendance.date = attendance.date || new Date(`${attendance.shiftDate}T00:00:00.000Z`);
+  attendance.checkInAt = attendance.sessions[0]?.startAt || attendance.checkInAt;
+  const closedSessions = attendance.sessions.filter((session) => session.endAt);
+  attendance.checkOutAt = closedSessions[closedSessions.length - 1]?.endAt || attendance.checkOutAt;
+  attendance.status = attendance.attendanceStatus === "half_day" ? "half-day" : attendance.attendanceStatus;
+  return attendance;
+};
 
-    return { accessScope: "workspace", filter, allowedUserIds: null };
+const saveAttendance = async (attendance, attendanceMode = "fixed") => {
+  computeTotals(attendance, attendanceMode);
+  syncLegacyAliases(attendance);
+  return repository.save(attendance);
+};
+
+const findToday = ({ user, timezone = "UTC", at = new Date() }) => {
+  const workspaceId = getWorkspaceId(user);
+  const shiftDate = getShiftDate(normalizeDateInput(at), timezone);
+  return repository.findByUserWorkspaceAndShiftDate(user._id || user.id, workspaceId, shiftDate);
+};
+
+const getOrCreateToday = async ({ user, timezone = "UTC", at = new Date() }) => {
+  const workspaceId = getWorkspaceId(user);
+  const userId = user._id || user.id;
+  const safeTimezone = validateTimezone(timezone);
+  const actionAt = normalizeDateInput(at);
+  const shiftDate = getShiftDate(actionAt, safeTimezone);
+  let attendance = await repository.findByUserWorkspaceAndShiftDate(userId, workspaceId, shiftDate);
+
+  if (!attendance) {
+    attendance = repository.create({
+      userId,
+      workspaceId,
+      shiftDate,
+      user: userId,
+      workspace: workspaceId,
+      date: new Date(`${shiftDate}T00:00:00.000Z`),
+      currentState: "offline",
+      attendanceStatus: "present",
+      approvalStatus: "none",
+      sessions: [],
+    });
   }
 
-  if (user.role === "manager") {
-    const teamMembers = await User.find({ manager: userId }).select("_id");
-    const allowedUserIds = teamMembers.map((member) => member._id);
+  return { attendance, actionAt, timezone: safeTimezone };
+};
 
-    if (query.userId && !allowedUserIds.some((id) => String(id) === String(query.userId))) {
-      throw ApiError.forbidden("Managers can only view attendance for their assigned team.");
-    }
+const closeActiveSession = (attendance, actionAt) => {
+  const activeSession = getActiveSession(attendance);
+  if (activeSession) activeSession.endAt = actionAt;
+};
 
-    return {
-      accessScope: "team",
-      filter: {
-        workspace: getWorkspaceId(user),
-        user: query.userId || { $in: allowedUserIds },
-      },
-      allowedUserIds,
-    };
+const handleFixedCheckIn = async ({ user, timezone = "UTC", at = new Date(), attendanceMode = "fixed" }) => {
+  const { attendance, actionAt, timezone: safeTimezone } = await getOrCreateToday({ user, timezone, at });
+
+  if (attendance.currentState === "checked_out") {
+    throw invalidTransition("Attendance is already checked out for this shift.", attendance.currentState, attendanceMode, getAllowedActions(attendance, attendanceMode));
   }
 
-  if (query.userId && String(query.userId) !== String(userId)) {
-    throw ApiError.forbidden("Employees can only view their own attendance.");
+  if (ACTIVE_STATES.includes(attendance.currentState)) {
+    throw invalidTransition("Attendance is already active for this shift.", attendance.currentState, attendanceMode, getAllowedActions(attendance, attendanceMode));
   }
 
-  return {
-    accessScope: "self",
-    filter: { workspace: getWorkspaceId(user), user: userId },
-    allowedUserIds: [userId],
+  attendance.currentState = "working";
+  attendance.attendanceStatus = "present";
+  attendance.sessions.push({ type: "work", startAt: actionAt, timezone: safeTimezone });
+  return saveAttendance(attendance, attendanceMode);
+};
+
+const handleFlexibleCheckIn = async ({ user, timezone = "UTC", at = new Date(), attendanceMode = "flexible" }) => {
+  const { attendance, actionAt, timezone: safeTimezone } = await getOrCreateToday({ user, timezone, at });
+  const activeSession = getActiveSession(attendance);
+
+  if (activeSession) {
+    throw invalidTransition("Attendance session is already running.", attendance.currentState, attendanceMode, getAllowedActions(attendance, attendanceMode));
+  }
+
+  attendance.currentState = "working";
+  attendance.attendanceStatus = "present";
+  attendance.sessions.push({ type: "work", startAt: actionAt, timezone: safeTimezone });
+  return saveAttendance(attendance, attendanceMode);
+};
+
+const checkIn = async ({ user, timezone = "UTC", at = new Date() }) => {
+  const policy = await getPolicyForUser(user);
+  const attendanceMode = policy.attendanceMode || "fixed";
+
+  if (attendanceMode === "fixed") {
+    return handleFixedCheckIn({ user, timezone, at, attendanceMode });
+  }
+
+  if (attendanceMode === "flexible") {
+    return handleFlexibleCheckIn({ user, timezone, at, attendanceMode });
+  }
+
+  throw ApiError.badRequest("Unsupported attendance mode.");
+};
+
+const startBreak = async ({ user, timezone = "UTC", at = new Date() }) => {
+  const policy = await getPolicyForUser(user);
+  const attendanceMode = policy.attendanceMode || "fixed";
+  if (attendanceMode === "flexible") {
+    throw invalidTransition("Breaks are implicit in flexible attendance mode.", "working", attendanceMode, ["check-out"]);
+  }
+
+  const attendance = await findToday({ user, timezone, at });
+  if (!attendance || attendance.currentState !== "working") {
+    throw invalidTransition("You must be working before starting a break.", attendance?.currentState || "offline", attendanceMode, getAllowedActions(attendance, attendanceMode));
+  }
+
+  const actionAt = normalizeDateInput(at);
+  closeActiveSession(attendance, actionAt);
+  attendance.currentState = "break";
+  attendance.sessions.push({ type: "break", startAt: actionAt, timezone: validateTimezone(timezone) });
+  return saveAttendance(attendance, attendanceMode);
+};
+
+const endBreak = async ({ user, timezone = "UTC", at = new Date() }) => {
+  const policy = await getPolicyForUser(user);
+  const attendanceMode = policy.attendanceMode || "fixed";
+  if (attendanceMode === "flexible") {
+    throw invalidTransition("Breaks are implicit in flexible attendance mode.", "offline", attendanceMode, ["check-in"]);
+  }
+
+  const attendance = await findToday({ user, timezone, at });
+  if (!attendance || attendance.currentState !== "break") {
+    throw invalidTransition("You must be on break before ending a break.", attendance?.currentState || "offline", attendanceMode, getAllowedActions(attendance, attendanceMode));
+  }
+
+  const actionAt = normalizeDateInput(at);
+  closeActiveSession(attendance, actionAt);
+  attendance.currentState = "working";
+  attendance.sessions.push({ type: "work", startAt: actionAt, timezone: validateTimezone(timezone) });
+  return saveAttendance(attendance, attendanceMode);
+};
+
+const handleFixedCheckOut = async ({ user, timezone = "UTC", at = new Date(), attendanceMode = "fixed" }) => {
+  const attendance = await findToday({ user, timezone, at });
+  if (!attendance) throw invalidTransition("You must check in before checking out.", "offline", attendanceMode, ["check-in"]);
+  if (attendance.currentState === "checked_out") return attendance;
+  if (!ACTIVE_STATES.includes(attendance.currentState)) {
+    throw invalidTransition("You must be working or on break before checking out.", attendance.currentState, attendanceMode, getAllowedActions(attendance, attendanceMode));
+  }
+
+  closeActiveSession(attendance, normalizeDateInput(at));
+  attendance.currentState = "checked_out";
+  attendance.attendanceStatus = attendance.sessions.some((session) => session.type === "work") ? "present" : "incomplete";
+  return saveAttendance(attendance, attendanceMode);
+};
+
+const handleFlexibleCheckOut = async ({ user, timezone = "UTC", at = new Date(), attendanceMode = "flexible" }) => {
+  const attendance = await findToday({ user, timezone, at });
+  if (!attendance) throw invalidTransition("You must check in before checking out.", "offline", attendanceMode, ["check-in"]);
+
+  const activeSession = getActiveSession(attendance);
+  if (!activeSession) {
+    throw invalidTransition("No active attendance session found.", attendance.currentState || "offline", attendanceMode, getAllowedActions(attendance, attendanceMode));
+  }
+
+  closeActiveSession(attendance, normalizeDateInput(at));
+  attendance.currentState = "offline";
+  attendance.attendanceStatus = attendance.sessions.some((session) => session.type === "work") ? "present" : "incomplete";
+  return saveAttendance(attendance, attendanceMode);
+};
+
+const checkOut = async ({ user, timezone = "UTC", at = new Date() }) => {
+  const policy = await getPolicyForUser(user);
+  const attendanceMode = policy.attendanceMode || "fixed";
+
+  if (attendanceMode === "fixed") {
+    return handleFixedCheckOut({ user, timezone, at, attendanceMode });
+  }
+
+  if (attendanceMode === "flexible") {
+    return handleFlexibleCheckOut({ user, timezone, at, attendanceMode });
+  }
+
+  throw ApiError.badRequest("Unsupported attendance mode.");
+};
+
+const clockIn = checkIn;
+const clockOut = checkOut;
+
+const ensureAttendanceAccess = (attendance, user) => {
+  const workspaceId = String(getWorkspaceId(user));
+  const attendanceWorkspaceId = String(attendance.workspaceId || attendance.workspace || attendance.userId?.adminRef || "");
+
+  if (user.role === "manager" && String(attendance.userId?.manager || attendance.user?.manager || "") !== String(user._id)) {
+    throw ApiError.forbidden("Managers can only manage attendance for their direct team.");
+  }
+
+  if (user.role === "admin" && attendanceWorkspaceId !== workspaceId) {
+    throw ApiError.forbidden("You can only manage attendance in your workspace.");
+  }
+};
+
+const manualClose = async ({ id, user, payload = {} }) => {
+  const attendance = await repository.findById(id);
+  if (!attendance) throw ApiError.notFound("Attendance record not found.");
+  ensureAttendanceAccess(attendance, user);
+  closeActiveSession(attendance, payload.checkOutAt ? new Date(payload.checkOutAt) : new Date());
+  attendance.currentState = "checked_out";
+  attendance.attendanceStatus = payload.status === "half-day" ? "half_day" : payload.status || "present";
+  attendance.closedBy = user._id;
+  attendance.closedReason = payload.closedReason || "Manual close";
+  return saveAttendance(attendance);
+};
+
+const requestAdjustment = async ({ id, user, payload = {} }) => {
+  const attendance = await repository.findById(id);
+  if (!attendance) throw ApiError.notFound("Attendance record not found.");
+  if (String(attendance.userId?._id || attendance.userId) !== String(user._id)) {
+    throw ApiError.forbidden("You can only request adjustments for your own attendance.");
+  }
+
+  attendance.approvalStatus = "pending";
+  attendance.adjustmentRequest = {
+    type: "attendance",
+    reason: payload.reason,
+    requestedSessions: payload.sessions || attendance.sessions,
+    requestedBy: user._id,
+    status: "pending",
   };
+  return repository.save(attendance);
 };
 
-const applyWeeklyFilters = async ({ filter, accessScope, allowedUserIds, query }) => {
-  const nextFilter = { ...filter };
-
-  if (query.status) {
-    const allowedStatuses = Object.values(ATTENDANCE_STATUS).filter((status) => status !== ATTENDANCE_STATUS.NONE);
-    if (!allowedStatuses.includes(query.status)) {
-      throw ApiError.badRequest("Invalid attendance status filter", [
-        { field: "status", allowedValues: allowedStatuses },
-      ]);
-    }
-    nextFilter.status = query.status;
+const reviewAdjustment = async ({ id, user, payload = {} }) => {
+  const attendance = await repository.findById(id);
+  if (!attendance) throw ApiError.notFound("Attendance record not found.");
+  ensureAttendanceAccess(attendance, user);
+  if (!attendance.adjustmentRequest || attendance.adjustmentRequest.status !== "pending") {
+    throw ApiError.badRequest("No pending attendance adjustment request found.");
   }
 
-  if (query.search && accessScope !== "self") {
-    const userSearch = {
+  attendance.adjustmentRequest.status = payload.status;
+  attendance.adjustmentRequest.reviewedBy = user._id;
+  attendance.adjustmentRequest.reviewedAt = new Date();
+  attendance.adjustmentRequest.reviewNote = payload.reviewNote;
+  attendance.approvalStatus = payload.status;
+
+  if (payload.status === "approved") {
+    attendance.sessions = attendance.adjustmentRequest.requestedSessions;
+    const hasActive = attendance.sessions.some((session) => !session.endAt);
+    attendance.currentState = hasActive ? (attendance.sessions[attendance.sessions.length - 1].type === "break" ? "break" : "working") : "checked_out";
+  }
+
+  return saveAttendance(attendance);
+};
+
+const getMyHistory = (userId) => repository.findUserHistory(userId);
+
+const buildAccessFilter = async ({ user, query = {}, scope = "auto" }) => {
+  const workspaceId = getWorkspaceId(user);
+  const filter = {};
+
+  if (scope === "self" || (scope === "auto" && user.role !== "admin" && user.role !== "manager")) {
+    filter.userId = user._id;
+    filter.workspaceId = workspaceId;
+    return { filter, accessScope: "self" };
+  }
+
+  if (scope === "team" || (scope === "auto" && user.role === "manager")) {
+    const teamMembers = await User.find({ adminRef: workspaceId, manager: user._id }).select("_id");
+    filter.workspaceId = workspaceId;
+    filter.userId = { $in: [user._id, ...teamMembers.map((member) => member._id)] };
+    return { filter, accessScope: "team" };
+  }
+
+  if (user.role !== "admin") throw ApiError.forbidden("Workspace attendance is only available to admins.");
+  filter.workspaceId = workspaceId;
+
+  if (query.userId) filter.userId = query.userId;
+  if (query.search) {
+    const matchingUsers = await User.find({
+      adminRef: workspaceId,
       $or: [
         { name: new RegExp(query.search, "i") },
         { email: new RegExp(query.search, "i") },
         { role: new RegExp(query.search, "i") },
       ],
-    };
-
-    if (Array.isArray(allowedUserIds)) {
-      userSearch._id = { $in: allowedUserIds };
-    } else {
-      userSearch.adminRef = nextFilter.workspace;
-    }
-
-    const users = await User.find(userSearch).select("_id");
-    nextFilter.user = { $in: users.map((foundUser) => foundUser._id) };
+    }).select("_id");
+    filter.userId = { $in: matchingUsers.map((member) => member._id) };
   }
 
-  return nextFilter;
+  return { filter, accessScope: "workspace" };
 };
 
-const migrateLegacyAttendanceRecord = ({ attendance, workspaceId, fallbackCheckInAt }) => {
-  if (!attendance) return attendance;
-
-  const legacyLoginTime = attendance.get?.("loginTime");
-  const legacyLogoutTime = attendance.get?.("logoutTime");
-  const legacyTotalHours = attendance.get?.("totalHours");
-
-  attendance.workspace = workspaceId;
-  attendance.checkInAt = attendance.checkInAt || legacyLoginTime || fallbackCheckInAt;
-  attendance.checkOutAt = attendance.checkOutAt || legacyLogoutTime;
-  attendance.totalMinutes = attendance.totalMinutes || Math.round((legacyTotalHours || 0) * 60);
-
-  return attendance;
-};
-
-const getStoredCheckInAt = (attendance) => attendance?.checkInAt || attendance?.get?.("loginTime");
-
-const getStoredCheckOutAt = (attendance) => attendance?.checkOutAt || attendance?.get?.("logoutTime");
-
-const checkIn = async ({ user }) => {
-  const userId = getUserId(user);
-  const workspaceId = getWorkspaceId(user);
-  const today = getToday();
-  const checkInAt = new Date();
-  const existing = await repository.findByUserWorkspaceAndDate(userId, workspaceId, today);
-  const legacyAttendance = existing || await repository.findLegacyByUserAndDate(userId, today);
-  const storedCheckInAt = getStoredCheckInAt(legacyAttendance);
-  const storedCheckOutAt = getStoredCheckOutAt(legacyAttendance);
-  const attendance = legacyAttendance
-    ? migrateLegacyAttendanceRecord({ attendance: legacyAttendance, workspaceId, fallbackCheckInAt: checkInAt })
-    : repository.create({
-      user: userId,
-      workspace: workspaceId,
-      date: today,
-    });
-
-  if (storedCheckOutAt) {
-    throw ApiError.badRequest("Already checked out for today.");
-  }
-
-  if (storedCheckInAt && !storedCheckOutAt) {
-    attendance.status = ATTENDANCE_STATUS.PRESENT;
-    await attendance.save();
-    return attendance;
-  }
-
-  attendance.checkInAt = checkInAt;
-  attendance.status = ATTENDANCE_STATUS.PRESENT;
-  await attendance.save();
-
-  return attendance;
-};
-
-const checkOut = async ({ user, io, req }) => {
-  const userId = getUserId(user);
-  const workspaceId = getWorkspaceId(user);
-  const today = getToday();
-  const attendance = await repository.findByUserWorkspaceAndDate(userId, workspaceId, today);
-
-  if (!attendance?.checkInAt) {
-    throw ApiError.notFound("No attendance check-in found for today.");
-  }
-
-  if (attendance.checkOutAt) {
-    throw ApiError.badRequest("Already checked out for today.");
-  }
-
-  const checkOutAt = new Date();
-  attendance.checkOutAt = checkOutAt;
-  attendance.totalMinutes = minutesBetween(attendance.checkInAt, checkOutAt);
-  attendance.status = ATTENDANCE_STATUS.PRESENT;
-  await attendance.save();
-
-  await timeTrackingService.stopActiveEntryForAttendanceCheckout({
-    user,
-    clockOutAt,
-    io,
-    req,
-  });
-
-  return attendance;
-};
-
-const getMyHistory = (userId) => repository.findUserHistory(userId);
-
-const getWorkspaceAttendance = (user) => {
-  const workspaceId = user.role === "admin" ? user._id : user.adminRef;
-  return repository.findWorkspaceAttendance(workspaceId);
-};
-
-const assertCanManageRecord = async ({ user, attendance }) => {
-  if (!attendance) {
-    throw ApiError.notFound("Attendance record not found.");
-  }
-
-  if (user.role === "admin" && String(attendance.workspace) === String(user._id)) {
-    return;
-  }
-
-  if (user.role === "manager") {
-    const employee = attendance.user;
-    if (employee?.manager && String(employee.manager) === String(user._id)) {
-      return;
-    }
-  }
-
-  throw ApiError.forbidden("You do not have permission to manage this attendance record.");
-};
-
-const manualClose = async ({ id, user, payload = {} }) => {
-  if (!["admin", "manager"].includes(user.role)) {
-    throw ApiError.forbidden("Only admins and managers can manually close attendance.");
-  }
-
-  const attendance = await repository.findById(id);
-  await assertCanManageRecord({ user, attendance });
-
-  if (!attendance.checkInAt) {
-    throw ApiError.badRequest("Cannot manually close attendance without a check-in time.");
-  }
-
-  if (attendance.checkOutAt) {
-    throw ApiError.badRequest("Attendance is already closed.");
-  }
-
-  const closeAt = payload.checkOutAt ? new Date(payload.checkOutAt) : new Date();
-  if (Number.isNaN(closeAt.getTime()) || closeAt < attendance.checkInAt) {
-    throw ApiError.badRequest("Manual close time must be after check-in time.");
-  }
-
-  attendance.checkOutAt = closeAt;
-  attendance.totalMinutes = minutesBetween(attendance.checkInAt, closeAt);
-  attendance.status = payload.status || ATTENDANCE_STATUS.PRESENT;
-  attendance.closedBy = getUserId(user);
-  attendance.closedReason = payload.closedReason || "Manual close";
-  await attendance.save();
-
-  return attendance;
-};
-
-const getWeeklyAttendance = async ({ user, query = {} }) => {
-  const { page, limit } = normalizePagination(query);
+const getWeeklyAttendance = async ({ user, query = {}, scope = "auto" }) => {
+  const page = Math.max(1, Number(query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(query.limit) || 10));
   const { weekStart, weekEnd } = getWeekRange(query.weekStart);
-  const access = await getAttendanceAccessScope({ user, query });
-  const filter = await applyWeeklyFilters({ ...access, query });
-  const [result, summary] = await Promise.all([
+  const { filter, accessScope } = await buildAccessFilter({ user, query, scope });
+
+  if (query.status) filter.attendanceStatus = query.status === "half-day" ? "half_day" : query.status;
+
+  const [{ records, total }, summary] = await Promise.all([
     repository.findWeeklyAttendance({ filter, page, limit, weekStart, weekEnd }),
     repository.summarizeWeeklyAttendance({ filter, weekStart, weekEnd }),
   ]);
-  const totalPages = Math.max(1, Math.ceil(result.total / limit));
 
   return {
-    records: result.records,
+    records,
     pagination: {
       page,
       limit,
-      total: result.total,
-      totalPages,
-      hasNextPage: page < totalPages,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      hasNextPage: page * limit < total,
       hasPrevPage: page > 1,
     },
-    week: {
-      startDate: weekStart.toISOString(),
-      endDate: weekEnd.toISOString(),
-    },
-    accessScope: access.accessScope,
+    week: { startDate: weekStart, endDate: weekEnd },
+    accessScope,
     summary,
   };
 };
 
-const markIncompleteOpenRecords = async () => {
-  const today = getToday();
-  const records = await repository.model.find({
-    date: { $lt: today },
-    checkInAt: { $exists: true },
-    checkOutAt: { $exists: false },
-    status: ATTENDANCE_STATUS.PRESENT,
-  });
+const getToday = async ({ user, timezone = "UTC" }) => findToday({ user, timezone });
+const getTodayContext = async ({ user, timezone = "UTC" }) => {
+  const policy = await getPolicyForUser(user);
+  const attendanceMode = policy.attendanceMode || "fixed";
+  const attendance = await findToday({ user, timezone });
 
-  await Promise.all(records.map((record) => {
-    record.status = ATTENDANCE_STATUS.INCOMPLETE;
-    return record.save();
-  }));
-
-  return records.length;
+  return {
+    attendance,
+    attendanceMode,
+    allowedActions: getAllowedActions(attendance, attendanceMode),
+  };
 };
+const getMyWeek = ({ user, query }) => getWeeklyAttendance({ user, query, scope: "self" });
+const getTeamWeek = ({ user, query }) => getWeeklyAttendance({ user, query, scope: "team" });
+const getWorkspaceWeek = ({ user, query }) => getWeeklyAttendance({ user, query, scope: "workspace" });
+const getWorkspaceAttendance = (user) => repository.findWorkspaceAttendance(getWorkspaceId(user));
 
 module.exports = {
   repository,
   checkIn,
+  startBreak,
+  endBreak,
   checkOut,
+  clockIn,
+  clockOut,
   manualClose,
+  requestAdjustment,
+  reviewAdjustment,
+  getToday,
+  getTodayContext,
+  getMyWeek,
+  getTeamWeek,
+  getWorkspaceWeek,
   getWeeklyAttendance,
-  markIncompleteOpenRecords,
-  getAttendanceAccessScope,
-  clockIn: checkIn,
-  clockOut: checkOut,
   getMyHistory,
   getWorkspaceAttendance,
+  getActiveAttendanceForUser: ({ user }) => repository.findActiveByUser(user._id || user.id, getWorkspaceId(user)),
+  getPolicyForUser,
+  getAllowedActions,
+  getWorkspaceId,
+  calculateImplicitBreakMinutes,
+  computeTotals,
 };
