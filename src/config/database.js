@@ -14,6 +14,8 @@ mongoose.connection.on("error", (error) => {
   console.error("MongoDB connection error:", error.message);
 });
 
+let connectionPromise = null;
+
 const getDbStatus = () => {
   const states = {
     0: "disconnected",
@@ -26,18 +28,33 @@ const getDbStatus = () => {
 };
 
 const connectDB = async () => {
-  try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000,
-      maxPoolSize: process.env.NODE_ENV === "production" ? 10 : 5,
-    });
-
-    logger.info("mongodb.connected", { host: conn.connection.host });
-    await ensureAttendanceIndexes();
-  } catch (error) {
-    console.error(`Error: ${error.message}`);
-    process.exit(1);
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
   }
+
+  if (!process.env.MONGODB_URI) {
+    throw new Error("MONGODB_URI is not set");
+  }
+
+  if (!connectionPromise) {
+    connectionPromise = mongoose
+      .connect(process.env.MONGODB_URI, {
+        serverSelectionTimeoutMS: 5000,
+        maxPoolSize: process.env.NODE_ENV === "production" ? 10 : 5,
+      })
+      .then(async (conn) => {
+        logger.info("mongodb.connected", { host: conn.connection.host });
+        await ensureAttendanceIndexes();
+        return conn.connection;
+      })
+      .catch((error) => {
+        connectionPromise = null;
+        console.error(`Error: ${error.message}`);
+        throw error;
+      });
+  }
+
+  return connectionPromise;
 };
 
 module.exports = connectDB;

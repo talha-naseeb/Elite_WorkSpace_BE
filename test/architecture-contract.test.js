@@ -27,6 +27,17 @@ test("API routes are mounted under versioned /api/v1 prefix", () => {
   assert.doesNotMatch(appSource, /app\.use\("\/api",\s*routes\)/, "app.js should not mount unversioned /api routes");
 });
 
+test("serverless API requests establish MongoDB without exiting the process", () => {
+  const v1RouterSource = readSource("api", "v1", "index.js");
+  const databaseSource = readSource("config", "database.js");
+
+  assert.match(v1RouterSource, /const connectDB = require\("\.\.\/\.\.\/config\/database"\)/);
+  assert.match(v1RouterSource, /ensureDatabaseConnection/);
+  assert.match(v1RouterSource, /router\.use\(ensureDatabaseConnection\)/);
+  assert.match(databaseSource, /connectionPromise/);
+  assert.doesNotMatch(databaseSource, /process\.exit\(/, "database connector should throw so serverless handlers can return an API error");
+});
+
 test("shared foundation files exist", () => {
   for (const filePath of [
     ["shared", "errors", "apiError.js"],

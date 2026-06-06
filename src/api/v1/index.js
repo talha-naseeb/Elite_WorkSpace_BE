@@ -16,11 +16,23 @@ const activityRoutes = require("../../routes/activity.routes");
 const projectRoutes = require("../../modules/projects/project.routes");
 const { authRateLimiter, generalRateLimiter } = require("../../middleware/rateLimit.middleware");
 const { requestLogger } = require("../../middleware/requestLogger.middleware");
+const connectDB = require("../../config/database");
 const { getDbStatus } = require("../../config/database");
+const ApiError = require("../../utils/apiError");
 
 const router = express.Router();
 
+const ensureDatabaseConnection = async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    next(ApiError.internal("Database connection failed"));
+  }
+};
+
 router.use(requestLogger);
+router.use(ensureDatabaseConnection);
 
 /**
  * @swagger
