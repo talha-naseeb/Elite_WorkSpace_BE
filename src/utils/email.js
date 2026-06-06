@@ -1,65 +1,147 @@
-const nodemailer = require("nodemailer");
+const { transporter, verifyTransport } = require("../services/email/email.transport");
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-});
+const DEFAULT_FRONTEND_URL = "https://elite-work-space-fe.vercel.app";
+const BRAND_NAME = "Workspace Elite";
 
-transporter.verify((err, success) => {
-  if (err) console.error("[SMTP] Connection Error:", err);
-});
+const theme = {
+  background: "#070b14",
+  card: "#0b1020",
+  cardSoft: "#111827",
+  foreground: "#f1f5f9",
+  muted: "#a4afc2",
+  subtle: "#64748b",
+  border: "#273044",
+  button: "#f1f5f9",
+  buttonText: "#070b14",
+  success: "#22c55e",
+  warning: "#f59e0b",
+  danger: "#ef4444",
+};
+
+verifyTransport();
+
+const getFrontendUrl = () => (process.env.FRONTEND_URL || DEFAULT_FRONTEND_URL).replace(/\/+$/, "");
+
+const buildAppUrl = (pathname, params = {}) => {
+  const url = new URL(pathname, `${getFrontendUrl()}/`);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return url.toString();
+};
+
+const escapeHtml = (value) =>
+  String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const renderButton = ({ href, label }) => `
+  <table role="presentation" cellpadding="0" cellspacing="0" style="margin: 32px auto;">
+    <tr>
+      <td style="border-radius: 999px; background: ${theme.button}; box-shadow: 0 18px 35px rgba(241, 245, 249, 0.16);">
+        <a href="${href}" style="display: inline-block; padding: 14px 28px; color: ${theme.buttonText}; font-size: 14px; font-weight: 800; letter-spacing: 0.01em; text-decoration: none; border-radius: 999px;">
+          ${escapeHtml(label)}
+        </a>
+      </td>
+    </tr>
+  </table>
+`;
+
+const renderPanel = (content) => `
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin: 24px 0; border: 1px solid ${theme.border}; border-radius: 18px; background: ${theme.cardSoft};">
+    <tr>
+      <td style="padding: 18px 20px; color: ${theme.foreground}; font-size: 14px; line-height: 1.7;">
+        ${content}
+      </td>
+    </tr>
+  </table>
+`;
+
+const renderEmail = ({ preheader, eyebrow, title, body, button, panel, note, tone = theme.success }) => `
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; color: transparent;">
+    ${escapeHtml(preheader)}
+  </div>
+  <div style="margin: 0; padding: 0; background: ${theme.background};">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background: ${theme.background}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+      <tr>
+        <td align="center" style="padding: 42px 16px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 640px; border: 1px solid ${theme.border}; border-radius: 28px; background: ${theme.card}; box-shadow: 0 28px 80px rgba(0, 0, 0, 0.38); overflow: hidden;">
+            <tr>
+              <td style="padding: 28px 32px; border-bottom: 1px solid ${theme.border}; background: linear-gradient(135deg, ${theme.card} 0%, #111827 100%);">
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="color: ${theme.foreground}; font-size: 20px; font-weight: 850; letter-spacing: -0.03em;">
+                      ${BRAND_NAME}
+                    </td>
+                    <td align="right">
+                      <span style="display: inline-block; width: 10px; height: 10px; border-radius: 999px; background: ${tone}; box-shadow: 0 0 22px ${tone};"></span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 38px 32px 32px;">
+                <p style="margin: 0 0 14px; color: ${theme.muted}; font-size: 12px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase;">
+                  ${escapeHtml(eyebrow)}
+                </p>
+                <h1 style="margin: 0 0 18px; color: ${theme.foreground}; font-size: 30px; line-height: 1.18; letter-spacing: -0.04em;">
+                  ${escapeHtml(title)}
+                </h1>
+                <div style="color: ${theme.muted}; font-size: 15px; line-height: 1.8;">
+                  ${body}
+                </div>
+                ${panel || ""}
+                ${button ? renderButton(button) : ""}
+                <p style="margin: 24px 0 0; color: ${theme.subtle}; font-size: 13px; line-height: 1.7;">
+                  ${note}
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 22px 32px; border-top: 1px solid ${theme.border}; background: ${theme.cardSoft}; color: ${theme.subtle}; font-size: 12px; line-height: 1.6; text-align: center;">
+                © ${new Date().getFullYear()} ${BRAND_NAME}. All rights reserved.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </div>
+`;
+
+const sendEmail = (mailOptions) => transporter.sendMail({ from: process.env.EMAIL_FROM, ...mailOptions });
 
 // Send Reset Password Email
 exports.sendResetPasswordEmail = async (email, token) => {
-  const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+  const resetUrl = buildAppUrl("/reset-password", { token });
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
     to: email,
     subject: "Password Reset Request | Workspace Elite",
-    html: `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f8; padding: 40px 0;">
-        <table align="center" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <tr>
-            <td style="background-color: #6366f1; padding: 20px 40px; color: #ffffff; text-align: center; font-size: 24px; font-weight: bold;">
-              Workspace Elite
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 40px;">
-              <h2 style="color: #333333; margin-bottom: 10px;">Password Reset Request</h2>
-              <p style="color: #555555; font-size: 15px; line-height: 1.6;">
-                Hi there,<br><br>
-                We received a request to reset your password. To continue, please click the button below to securely reset your password.
-              </p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${resetUrl}" style="background-color: #6366f1; color: #ffffff; text-decoration: none; padding: 12px 30px; border-radius: 6px; font-weight: 600; display: inline-block;">
-                  Reset Password
-                </a>
-              </div>
-              <p style="color: #555555; font-size: 14px; line-height: 1.6;">
-                If you did not request this, please ignore this email. Your password will remain unchanged.
-              </p>
-              <p style="color: #999999; font-size: 12px; margin-top: 20px;">
-                This link will expire in <strong>24 hours</strong> for your security.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #f4f6f8; text-align: center; padding: 20px; font-size: 12px; color: #888888;">
-              © ${new Date().getFullYear()} Workspace Elite. All rights reserved.
-            </td>
-          </tr>
-        </table>
-      </div>
-    `,
+    html: renderEmail({
+      preheader: "Reset your Workspace Elite password securely.",
+      eyebrow: "Security Request",
+      title: "Reset your password",
+      body: `
+        <p style="margin: 0 0 16px;">Hi there,</p>
+        <p style="margin: 0;">We received a request to reset your password. Use the secure button below to choose a new password for your Workspace Elite account.</p>
+      `,
+      button: { href: resetUrl, label: "Reset Password" },
+      note: "If you did not request this, you can ignore this email. This link expires in <strong style=\"color: #f1f5f9;\">24 hours</strong> for your security.",
+      tone: theme.warning,
+    }),
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendEmail(mailOptions);
   } catch (error) {
     throw new Error("Error sending reset password email");
   }
@@ -67,52 +149,26 @@ exports.sendResetPasswordEmail = async (email, token) => {
 
 // Send Verification Email
 exports.sendVerificationEmail = async (email, token) => {
-  const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+  const verifyUrl = buildAppUrl("/verify-email", { token });
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
     to: email,
     subject: "Email Verification | Workspace Elite",
-    html: `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f8; padding: 40px 0;">
-        <table align="center" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <tr>
-            <td style="background-color: #6366f1; padding: 20px 40px; color: #ffffff; text-align: center; font-size: 24px; font-weight: bold;">
-              Workspace Elite
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 40px;">
-              <h2 style="color: #333333; margin-bottom: 10px;">Verify Your Email</h2>
-              <p style="color: #555555; font-size: 15px; line-height: 1.6;">
-                Hi ${email},<br><br>
-                Please click the button below to verify your email address and activate your Workspace Elite account.
-              </p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${verifyUrl}" style="background-color: #6366f1; color: #ffffff; text-decoration: none; padding: 12px 30px; border-radius: 6px; font-weight: 600; display: inline-block;">
-                  Verify Email
-                </a>
-              </div>
-              <p style="color: #555555; font-size: 14px; line-height: 1.6;">
-                If you did not create an account, you can safely ignore this email.
-              </p>
-              <p style="color: #999999; font-size: 12px; margin-top: 20px;">
-                This link will expire in <strong>1 hour</strong> for your security.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #f4f6f8; text-align: center; padding: 20px; font-size: 12px; color: #888888;">
-              © ${new Date().getFullYear()} Workspace Elite. All rights reserved.
-            </td>
-          </tr>
-        </table>
-      </div>
-    `,
+    html: renderEmail({
+      preheader: "Verify your email to activate Workspace Elite.",
+      eyebrow: "Account Verification",
+      title: "Confirm your email",
+      body: `
+        <p style="margin: 0 0 16px;">Hi ${escapeHtml(email)},</p>
+        <p style="margin: 0;">You are one step away from activating your Workspace Elite account. Confirm this email address to unlock your workspace.</p>
+      `,
+      button: { href: verifyUrl, label: "Verify Email" },
+      note: "If you did not create an account, you can safely ignore this email. This link expires in <strong style=\"color: #f1f5f9;\">1 hour</strong>.",
+    }),
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendEmail(mailOptions);
   } catch (error) {
     throw error;
   }
@@ -120,57 +176,30 @@ exports.sendVerificationEmail = async (email, token) => {
 
 // Send Employee Credentials Email
 exports.sendEmployeeCredentialsEmail = async (toEmail, plainPassword, verificationToken) => {
-  const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+  const verifyUrl = buildAppUrl("/verify-email", { token: verificationToken });
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
     to: toEmail,
     subject: "Your Account Credentials | Workspace Elite",
-    html: `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f8; padding: 40px 0;">
-        <table align="center" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <tr>
-            <td style="background-color: #6366f1; padding: 20px 40px; color: #ffffff; text-align: center; font-size: 24px; font-weight: bold;">
-              Workspace Elite
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 40px;">
-              <h2 style="color: #333333; margin-bottom: 10px;">Welcome to Workspace Elite</h2>
-              <p style="color: #555555; font-size: 15px; line-height: 1.6;">
-                Hi ${toEmail},<br><br>
-                Your account has been created successfully. Please use the credentials below to login and update your password:
-              </p>
-              <table cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0;">
-                <tr>
-                  <td style="padding: 10px; background: #f4f6f8; border-radius: 6px;">
-                    <p style="margin: 5px 0;"><strong>Email:</strong> ${toEmail}</p>
-                    <p style="margin: 5px 0;"><strong>Password:</strong> ${plainPassword}</p>
-                  </td>
-                </tr>
-              </table>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${verifyUrl}" style="background-color: #6366f1; color: #ffffff; text-decoration: none; padding: 12px 30px; border-radius: 6px; font-weight: 600; display: inline-block;">
-                  Login to Workspace Elite
-                </a>
-              </div>
-              <p style="color: #555555; font-size: 14px; line-height: 1.6;">
-                Please change your password after your first login to keep your account secure.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #f4f6f8; text-align: center; padding: 20px; font-size: 12px; color: #888888;">
-              © ${new Date().getFullYear()} Workspace Elite. All rights reserved.
-            </td>
-          </tr>
-        </table>
-      </div>
-    `,
+    html: renderEmail({
+      preheader: "Your Workspace Elite account is ready.",
+      eyebrow: "Welcome",
+      title: "Your workspace account is ready",
+      body: `
+        <p style="margin: 0 0 16px;">Hi ${escapeHtml(toEmail)},</p>
+        <p style="margin: 0;">Your account has been created successfully. Use the temporary credentials below, then verify your email and update your password after your first login.</p>
+      `,
+      panel: renderPanel(`
+        <p style="margin: 0 0 10px;"><strong style="color: ${theme.foreground};">Email:</strong> ${escapeHtml(toEmail)}</p>
+        <p style="margin: 0;"><strong style="color: ${theme.foreground};">Temporary password:</strong> ${escapeHtml(plainPassword)}</p>
+      `),
+      button: { href: verifyUrl, label: "Verify and Continue" },
+      note: "For your security, change this temporary password immediately after signing in.",
+    }),
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendEmail(mailOptions);
   } catch (error) {
     throw error;
   }
@@ -178,52 +207,27 @@ exports.sendEmployeeCredentialsEmail = async (toEmail, plainPassword, verificati
 
 // Send Password Changed Confirmation Email
 exports.sendPasswordChangedEmail = async (email) => {
-  const loginUrl = `${process.env.FRONTEND_URL}/auth/login`;
+  const loginUrl = buildAppUrl("/auth/login");
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
     to: email,
     subject: "Security Alert: Password Changed | Workspace Elite",
-    html: `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f8; padding: 40px 0;">
-        <table align="center" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <tr>
-            <td style="background-color: #6366f1; padding: 20px 40px; color: #ffffff; text-align: center; font-size: 24px; font-weight: bold;">
-              Workspace Elite
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 40px;">
-              <h2 style="color: #333333; margin-bottom: 10px;">Security Confirmation</h2>
-              <p style="color: #555555; font-size: 15px; line-height: 1.6;">
-                Hi ${email},<br><br>
-                This is a confirmation that the password for your Workspace Elite account has been successfully changed.
-              </p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${loginUrl}" style="background-color: #6366f1; color: #ffffff; text-decoration: none; padding: 12px 30px; border-radius: 6px; font-weight: 600; display: inline-block;">
-                  Login to Your Account
-                </a>
-              </div>
-              <p style="color: #555555; font-size: 14px; line-height: 1.6;">
-                If you did not perform this action, please contact our support team immediately.
-              </p>
-              <p style="color: #999999; font-size: 12px; margin-top: 20px;">
-                Securely yours,<br>The Workspace Elite Security Team
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #f4f6f8; text-align: center; padding: 20px; font-size: 12px; color: #888888;">
-              © ${new Date().getFullYear()} Workspace Elite. All rights reserved.
-            </td>
-          </tr>
-        </table>
-      </div>
-    `,
+    html: renderEmail({
+      preheader: "Your Workspace Elite password was changed.",
+      eyebrow: "Security Confirmation",
+      title: "Password changed",
+      body: `
+        <p style="margin: 0 0 16px;">Hi ${escapeHtml(email)},</p>
+        <p style="margin: 0;">This confirms that the password for your Workspace Elite account was changed successfully.</p>
+      `,
+      button: { href: loginUrl, label: "Login to Your Account" },
+      note: "If you did not perform this action, contact support immediately so we can help secure your account.",
+      tone: theme.danger,
+    }),
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendEmail(mailOptions);
   } catch (error) {
     // Non-blocking error
   }
