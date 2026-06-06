@@ -50,6 +50,9 @@ const startServer = async () => {
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
-startServer();
+startServer().catch((error) => {
+  logger.error("server.start.failed", { message: error.message });
+  process.exit(1);
+});
 
 module.exports = { app, server, startServer };
