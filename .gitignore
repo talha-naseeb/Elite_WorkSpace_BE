@@ -50,3 +50,5 @@ build/
 *.swo
 .temp/
 .cache/
+.db-backups/
+.vercel
