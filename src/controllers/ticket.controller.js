@@ -6,7 +6,7 @@ const asyncHandler = require("../utils/helpers/asyncHandler");
 const { logActivity } = require("../utils/activityLogger");
 const { notifySlack, ticketCreatedMessage } = require("../utils/slack");
 
-// Create ticket (employee/manager/admin)
+// Create ticket (member/manager/admin)
 exports.createTicket = asyncHandler(async (req, res) => {
   const { title, description, priority, assignedTo } = req.body;
   if (!title) throw ApiError.badRequest("Title is required");
@@ -23,7 +23,7 @@ exports.createTicket = asyncHandler(async (req, res) => {
       }
     }
 
-    // If requester is employee, allow assign only to teammates (same manager)
+    // If requester is a member, allow assign only to teammates (same manager)
     if (req.user.role !== "manager" && req.user.role !== "admin") {
       const requesterManager = String(req.user.manager || "");
       const targetManager = String(target.manager || "");
@@ -67,7 +67,7 @@ exports.getTickets = asyncHandler(async (req, res) => {
   const q = req.query || {};
   const filter = {};
 
-  if (req.user.role === "employee" || req.user.role === "developer" || req.user.role === "designer") {
+  if (req.user.role === "member") {
     filter.$or = [{ createdBy: req.user._id }, { assignedTo: req.user._id }];
     filter.adminRef = req.user.adminRef;
   } else if (req.user.role === "manager") {
@@ -76,10 +76,10 @@ exports.getTickets = asyncHandler(async (req, res) => {
     const teamIds = team.map((t) => t._id);
     filter.$or = [{ createdBy: { $in: teamIds } }, { assignedTo: { $in: teamIds } }];
     filter.adminRef = req.user.adminRef;
-  } else if (req.user.role === "admin" || req.user.role === "qualityAssurance") {
-    const isAdmin = req.user.role === "admin";
-    const adminId = isAdmin ? req.user._id : req.user.adminRef;
-    filter.adminRef = adminId;
+  } else if (req.user.role === "admin") {
+    filter.adminRef = req.user._id;
+  } else {
+    throw ApiError.forbidden("You do not have permission to view tickets");
   }
 
   if (q.status) filter.status = q.status;
@@ -104,7 +104,7 @@ exports.addComment = asyncHandler(async (req, res) => {
   res.status(200).json(ApiResponse.success("Comment added", { ticket }));
 });
 
-// Assign ticket to user (manager/admin/employee with same manager)
+// Assign ticket to user (manager/admin/member with same manager)
 exports.assignTicket = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { assignedTo } = req.body;

@@ -8,16 +8,16 @@ const workspaceRoot = path.resolve(root, "..");
 const readBackend = (...segments) => readFileSync(path.join(root, "src", ...segments), "utf8");
 const readWorkspace = (...segments) => readFileSync(path.join(workspaceRoot, ...segments), "utf8");
 
-test("developers can discover only projects they belong to", () => {
+test("members can discover only projects they belong to", () => {
   const routes = readBackend("routes", "project.routes.js");
   const controller = readBackend("controllers", "project.controller.js");
 
-  assert.match(routes, /\.get\(authorize\("admin",\s*"manager",\s*"developer",\s*"employee"\)/);
-  assert.match(controller, /const isIndividualContributor = .*developer.*employee/s);
+  assert.match(routes, /\.get\(authorize\("admin",\s*"manager",\s*"member"\)/);
+  assert.match(controller, /const isIndividualContributor = .*"member"/s);
   assert.match(controller, /\$or:\s*\[[\s\S]*members:\s*req\.user\._id[\s\S]*manager:\s*req\.user\._id[\s\S]*createdBy:\s*req\.user\._id[\s\S]*\]/);
 });
 
-test("task creation validates employee assignment against selected project scope", () => {
+test("task creation validates member assignment against selected project scope", () => {
   const controller = readBackend("controllers", "task.controller.js");
 
   assert.match(controller, /const Project = require\("\.\.\/models\/project\.model"\)/);
@@ -42,7 +42,7 @@ test("frontend task services and types avoid broad any payloads", () => {
   assert.match(types, /members:\s*TaskUser\[\]/);
 });
 
-test("task page fetches projects for employees and passes project context to dialog", () => {
+test("task page fetches projects for members and passes project context to dialog", () => {
   const page = readWorkspace("front-end", "src", "pages", "tasks", "TasksPage.tsx");
 
   assert.doesNotMatch(page, /queryKey:\s*\["projects"\][\s\S]*?enabled:\s*user\?\.role/);

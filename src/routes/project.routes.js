@@ -11,7 +11,7 @@ router.use(authenticate, validateUserEmail);
 // POST /api/projects        — create a new project
 router
   .route("/")
-  .get(authorize("admin", "manager", "developer", "employee"), projectController.getProjects)
+  .get(authorize("admin", "manager", "member"), projectController.getProjects)
   .post(authorize("admin", "manager"), projectController.createProject);
 
 // GET    /api/projects/:id  — get project + its tasks
@@ -19,7 +19,7 @@ router
 // DELETE /api/projects/:id  — delete project
 router
   .route("/:id")
-  .get(authorize("admin", "manager", "developer"), projectController.getProjectById)
+  .get(authorize("admin", "manager", "member"), projectController.getProjectById)
   .put(authorize("admin", "manager"), projectController.updateProject)
   .delete(authorize("admin", "manager"), projectController.deleteProject);
 

@@ -18,7 +18,7 @@ const notifyTaskUpdate = (req, event, data) => {
 
 const getAdminId = (user) => user.role === "admin" ? user._id : user.adminRef;
 
-const isIndividualContributor = (user) => user.role === "developer" || user.role === "employee";
+const isIndividualContributor = (user) => user.role === "member";
 
 const validateCreateTaskAssignee = async ({ user, adminId, assignee, projectRef }) => {
   const requestedAssignee = assignee || user._id;
@@ -107,7 +107,7 @@ exports.createTask = asyncHandler(async (req, res) => {
     message: `created task "${task.title}"`,
     userId: req.user._id,
     adminRef: adminId,
-    metadata: { taskId: task._id },
+    metadata: { taskId: task._id, projectId: task.projectRef },
     io: req.app.get("io"),
   });
 
@@ -127,8 +127,8 @@ exports.getTasks = asyncHandler(async (req, res) => {
 
   let query = { adminRef: adminId };
 
-  // If Employee, only see tasks assigned to them OR created by them
-  if (req.user.role === "developer" || req.user.role === "employee") {
+  // Members only see tasks assigned to them OR created by them
+  if (req.user.role === "member") {
     query.$or = [
       { assignee: req.user._id },
       { assignedBy: req.user._id }
@@ -196,7 +196,7 @@ exports.updateTaskStatus = asyncHandler(async (req, res) => {
     message: `changed "${task.title}" from ${oldStatus} to ${status}`,
     userId: req.user._id,
     adminRef: adminId,
-    metadata: { taskId: task._id, oldStatus, status },
+    metadata: { taskId: task._id, projectId: task.projectRef, oldStatus, status },
     io: req.app.get("io"),
   });
 
@@ -293,7 +293,7 @@ exports.updateTask = asyncHandler(async (req, res) => {
     message: `updated task "${task.title}"`,
     userId: req.user._id,
     adminRef: adminId,
-    metadata: { taskId: task._id },
+    metadata: { taskId: task._id, projectId: task.projectRef },
     io: req.app.get("io"),
   });
 

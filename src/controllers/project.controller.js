@@ -1,12 +1,63 @@
 const Project = require("../models/project.model");
 const Task = require("../models/task.model");
+const Activity = require("../models/activity.model");
+const TimeEntry = require("../modules/time-tracking/time-entry.model");
 const ApiError = require("../utils/apiError");
 const ApiResponse = require("../utils/apiResponse");
 const asyncHandler = require("../utils/helpers/asyncHandler");
+const { logActivity } = require("../utils/activityLogger");
 
 /** Resolve the workspace adminRef from the requesting user */
 const getAdminId = (user) =>
   user.role === "admin" ? user._id : user.adminRef;
+
+const toIdString = (value) => String(value?._id || value?.id || value || "");
+
+const buildProjectTimeSummary = async ({ adminId, projectId, taskIds }) => {
+  const entries = await TimeEntry.find({
+    $or: [
+      { workspaceId: adminId, projectId },
+      { workspace: adminId, project: projectId },
+      { workspaceId: adminId, taskId: { $in: taskIds } },
+      { workspace: adminId, task: { $in: taskIds } },
+    ],
+  }).select("durationMinutes taskId task projectId project");
+
+  const trackedMinutesByTask = {};
+  let totalTrackedMinutes = 0;
+  let entryCount = 0;
+
+  entries.forEach((entry) => {
+    const durationMinutes = entry.durationMinutes || 0;
+    const taskId = toIdString(entry.taskId || entry.task);
+
+    totalTrackedMinutes += durationMinutes;
+    entryCount += 1;
+
+    if (taskId) {
+      trackedMinutesByTask[taskId] = (trackedMinutesByTask[taskId] || 0) + durationMinutes;
+    }
+  });
+
+  return {
+    totalTrackedMinutes,
+    totalTrackedHours: Number((totalTrackedMinutes / 60).toFixed(2)),
+    entryCount,
+    trackedMinutesByTask,
+  };
+};
+
+const getProjectRecentActivity = ({ adminId, projectId, taskIds }) =>
+  Activity.find({
+    adminRef: adminId,
+    $or: [
+      { "metadata.projectId": projectId },
+      { "metadata.taskId": { $in: taskIds } },
+    ],
+  })
+    .sort({ createdAt: -1 })
+    .limit(12)
+    .populate("user", "name email role profileImage");
 
 /**
  * @desc  Get all projects in the workspace (with live task counts)
@@ -15,7 +66,7 @@ const getAdminId = (user) =>
  */
 exports.getProjects = asyncHandler(async (req, res) => {
   const adminId = getAdminId(req.user);
-  const isIndividualContributor = req.user.role === "developer" || req.user.role === "employee";
+  const isIndividualContributor = req.user.role === "member";
   let projectFilter = { adminRef: adminId };
 
   if (isIndividualContributor) {
@@ -88,7 +139,23 @@ exports.getProjectById = asyncHandler(async (req, res) => {
     .populate("assignedBy", "name email")
     .sort({ createdAt: -1 });
 
-  res.status(200).json(ApiResponse.success("Project retrieved", { project, tasks }));
+  const taskIds = tasks.map((task) => task._id);
+  const [timeSummary, recentActivity] = await Promise.all([
+    buildProjectTimeSummary({ adminId, projectId: project._id, taskIds }),
+    getProjectRecentActivity({ adminId, projectId: project._id, taskIds }),
+  ]);
+
+  const enrichedTasks = tasks.map((task) => ({
+    ...task.toObject(),
+    trackedMinutes: timeSummary.trackedMinutesByTask[toIdString(task._id)] || 0,
+  }));
+
+  res.status(200).json(ApiResponse.success("Project retrieved", {
+    project,
+    tasks: enrichedTasks,
+    timeSummary,
+    recentActivity,
+  }));
 });
 
 /**
@@ -119,6 +186,15 @@ exports.createProject = asyncHandler(async (req, res) => {
   await project.populate("createdBy", "name email");
   await project.populate("manager", "name email");
   await project.populate("members", "name email role");
+
+  await logActivity({
+    type: "project_created",
+    message: `created project "${project.title}"`,
+    userId: req.user._id,
+    adminRef: adminId,
+    metadata: { projectId: project._id },
+    io: req.app.get("io"),
+  });
 
   res.status(201).json(ApiResponse.created("Project created successfully", { project }));
 });
@@ -151,6 +227,15 @@ exports.updateProject = asyncHandler(async (req, res) => {
   await project.populate("manager", "name email");
   await project.populate("members", "name email role");
 
+  await logActivity({
+    type: "project_updated",
+    message: `updated project "${project.title}"`,
+    userId: req.user._id,
+    adminRef: adminId,
+    metadata: { projectId: project._id },
+    io: req.app.get("io"),
+  });
+
   res.status(200).json(ApiResponse.success("Project updated successfully", { project }));
 });
 
@@ -172,6 +257,15 @@ exports.deleteProject = asyncHandler(async (req, res) => {
 
   // Unlink tasks — they remain in the workspace but lose their project association
   await Task.updateMany({ projectRef: project._id }, { $set: { projectRef: null } });
+
+  await logActivity({
+    type: "project_deleted",
+    message: `deleted project "${project.title}"`,
+    userId: req.user._id,
+    adminRef: adminId,
+    metadata: { projectId: project._id },
+    io: req.app.get("io"),
+  });
 
   await Project.deleteOne({ _id: project._id });
 

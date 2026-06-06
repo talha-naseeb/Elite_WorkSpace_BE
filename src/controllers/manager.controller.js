@@ -72,7 +72,7 @@ exports.createEmployee = asyncHandler(async (req, res) => {
     name,
     email,
     password: hashedPassword,
-    role: requestedRole || "developer",
+    role: requestedRole || "member",
     adminRef: adminId,
     manager: managerId,
     companyEmail: companyEmail || email,

@@ -49,7 +49,7 @@ exports.validateSignUpAuth = (req, res, next) => {
   }
 
   // Validate role
-  if (role && !["super_admin", "admin", "manager", "employee", "developer"].includes(role)) {
+  if (role && !["super_admin", "admin", "manager", "member"].includes(role)) {
     errors.push("Invalid role specified");
   }
 

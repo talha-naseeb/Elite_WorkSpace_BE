@@ -4,7 +4,18 @@ const activitySchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ["task_created", "task_updated", "ticket_created", "ticket_updated", "attendance_logged", "user_added", "settings_update"],
+      enum: [
+        "task_created",
+        "task_updated",
+        "project_created",
+        "project_updated",
+        "project_deleted",
+        "ticket_created",
+        "ticket_updated",
+        "attendance_logged",
+        "user_added",
+        "settings_update",
+      ],
       required: true,
     },
     message: {

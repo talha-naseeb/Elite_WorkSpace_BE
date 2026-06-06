@@ -21,8 +21,8 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["super_admin", "admin", "manager", "developer"],
-      default: "developer",
+      enum: ["super_admin", "admin", "manager", "member"],
+      default: "member",
     },
     // Multi-tenancy: Every non-admin user must belong to an Admin's workspace
     adminRef: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
@@ -44,6 +44,11 @@ const userSchema = new mongoose.Schema(
     },
 
     mobileNumber: String,
+    companyEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
     department: {
       type: String,
     },
@@ -83,6 +88,16 @@ const userSchema = new mongoose.Schema(
     },
 
     lastLogin: Date,
+    status: {
+      type: String,
+      enum: ["active", "inactive"],
+      default: "active",
+    },
+    emailSent: {
+      type: Boolean,
+      default: false,
+    },
+    emailDeliveryError: String,
   },
   {
     timestamps: true,

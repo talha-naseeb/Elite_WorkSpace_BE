@@ -34,8 +34,8 @@ exports.ensureSameManager = (targetPath) => {
         return next();
       }
 
-      // If requester is employee, they can only operate on teammates (same manager)
-      if (req.user.role === "employee" || req.user.role === "developer" || req.user.role === "designer" || req.user.role === "qualityAssurance") {
+      // If requester is a member, they can only operate on teammates (same manager)
+      if (req.user.role === "member") {
         // both must have same manager id (could be undefined)
         const requesterManager = String(req.user.manager || "");
         const targetManager = String(targetUser.manager || "");
